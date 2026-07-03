@@ -652,6 +652,7 @@ class Mission:
                 "Start by listening to ATIS on 132.65, then call Clearance Delivery on 132.9."
             ),
             "freqs": {k: _mhz(v) for k, v in airport.FREQS.items()},
+            "chart_info": airport.CHART_INFO,
             "plane": {"view": "ground", "pos": list(airport.NODES["fbo"])},
             "pattern_points": {k: list(v) for k, v in airport.PATTERN_POINTS.items()},
             "coach_hint": self.steps["clearance_call"].coach,

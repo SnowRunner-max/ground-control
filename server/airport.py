@@ -36,6 +36,35 @@ FACILITY_NAMES = {
     "approach": "Santa Barbara Approach",
 }
 
+# Non-critical chart marginalia relocated from the map into the UI drawer,
+# transcribed from the FAA KSBA airport diagram (AL-378). The frequency values
+# mirror FREQS above (kept as printed strings, incl. the tower UHF that the sim
+# radio does not model). Consumed by Mission.brief() as brief["chart_info"].
+CHART_INFO = {
+    "frequencies": [
+        {"label": "ATIS", "value": "132.65"},
+        {"label": "Clearance", "value": "132.9"},
+        {"label": "Ground", "value": "121.7"},
+        {"label": "Tower", "value": "119.7 / 254.35"},
+        {"label": "Approach", "value": "125.4"},
+    ],
+    "field": {"elevation_ft": 14, "pattern_altitude_ft_agl": 1000},
+    "runways": [
+        {"id": "7-25", "dimensions_ft": "6052 x 150",
+         "pcn": "66 F/A/X/U", "strength": "S-110, D-160, 2D-245"},
+        {"id": "15L-33R", "dimensions_ft": "4184 x 100",
+         "pcn": "14 F/A/X/T", "strength": "S-35, D-41, 2D-63"},
+        {"id": "15R-33L", "dimensions_ft": "4180 x 75",
+         "pcn": "19 F/A/X/U", "strength": "S-48, D-63, 2D-100"},
+    ],
+    "notes": [
+        "CAUTION: Be alert to runway crossing clearances. Readback of all "
+        "runway holding instructions is required.",
+        "Magnetic variation 12.2° E (annual rate of change 0.1° W, Jan 2020).",
+        "FAA airport diagram AL-378, effective 22 FEB 2024 to 21 MAR 2024.",
+    ],
+}
+
 # ------------------------------------------------------------- ground graph
 
 NODES = {

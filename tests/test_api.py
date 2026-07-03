@@ -58,6 +58,24 @@ class TestApi:
         assert "atis_display" in b
         assert b["plane"]["view"] == "ground"
 
+    def test_brief_includes_chart_info_for_drawer(self, client):
+        b = new_mission(client)
+        ci = b["chart_info"]
+        # frequencies for the drawer, including the tower UHF not in the sim map
+        labels = {f["label"]: f["value"] for f in ci["frequencies"]}
+        assert labels["ATIS"] == "132.65"
+        assert labels["Tower"] == "119.7 / 254.35"
+        assert labels["Clearance"] == "132.9"
+        # field + runway reference
+        assert ci["field"]["elevation_ft"] == 14
+        rwys = {r["id"]: r for r in ci["runways"]}
+        assert rwys["7-25"]["dimensions_ft"] == "6052 x 150"
+        assert "15L-33R" in rwys and "15R-33L" in rwys
+        # notes carry the crossing-caution text and magnetic variation
+        notes_blob = " ".join(ci["notes"]).upper()
+        assert "READBACK" in notes_blob and "CROSSING" in notes_blob
+        assert "12.2" in notes_blob
+
     def test_atis_wav(self, client):
         new_mission(client)
         r = client.get("/api/atis.wav")
