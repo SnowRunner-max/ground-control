@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ground Control — KSBA</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="start-overlay" class="overlay">
+  <div class="dialog">
+    <h1>Ground Control</h1>
+    <p class="sub">VFR radio trainer · Santa Barbara Muni (KSBA)</p>
+    <label>Callsign
+      <input id="callsign-input" value="N67525" maxlength="7" spellcheck="false">
+    </label>
+    <label class="check">
+      <input id="coach-check" type="checkbox" checked>
+      Coach mode (hints, corrections, ideal calls)
+    </label>
+    <button id="start-btn" class="primary">Start Mission</button>
+    <p class="hint">Uses your microphone — hold <b>Space</b> to transmit.
+       No mic? There's a text box too.</p>
+  </div>
+</div>
+
+<div id="debrief-overlay" class="overlay" hidden>
+  <div class="dialog wide">
+    <h1>Mission Complete</h1>
+    <p id="debrief-total" class="sub"></p>
+    <p id="debrief-narrative" class="narrative">Your instructor is writing the debrief…</p>
+    <table id="debrief-table">
+      <thead><tr><th>Exchange</th><th>Score</th><th>Attempts</th><th>Missed items</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <button class="primary" onclick="location.reload()">New Mission</button>
+  </div>
+</div>
+
+<header>
+  <span class="brand">GROUND CONTROL · KSBA</span>
+  <span id="hdr-callsign"></span>
+  <span id="view-label"></span>
+</header>
+
+<main hidden id="game">
+  <section id="map-panel">
+    <canvas id="map"></canvas>
+  </section>
+
+  <aside id="sidebar">
+    <div class="panel" id="mission-card">
+      <h3>Mission</h3>
+      <p id="mission-text"></p>
+      <div id="freq-list"></div>
+      <details id="atis-details"><summary>ATIS text (cheat)</summary>
+        <p id="atis-text"></p></details>
+    </div>
+
+    <div class="panel" id="coach-panel">
+      <h3>Coach</h3>
+      <p id="coach-text">—</p>
+    </div>
+
+    <div class="panel" id="radio-panel">
+      <h3>COM 1 <span class="model">KX 155</span></h3>
+      <div class="com-row">
+        <div class="freq-block">
+          <span class="freq-label">ACT</span>
+          <div class="freq-display" id="com-active">118.00</div>
+        </div>
+        <button id="com-swap" title="Flip-flop: swap active and standby">⇄</button>
+        <div class="freq-block">
+          <span class="freq-label">STBY</span>
+          <div class="freq-display standby" id="com-standby">132.65</div>
+        </div>
+      </div>
+      <div class="knob-row">
+        <span class="knob-label">MHz</span>
+        <button data-knob="mhz" data-dir="1">▲</button>
+        <button data-knob="mhz" data-dir="-1">▼</button>
+        <span class="knob-label">kHz</span>
+        <button data-knob="khz" data-dir="1">▲</button>
+        <button data-knob="khz" data-dir="-1">▼</button>
+      </div>
+
+      <h3 class="xpdr-h">Transponder <span class="model">KT 76A</span></h3>
+      <div class="xpdr-row">
+        <div class="xpdr-digits" id="xpdr-digits"></div>
+        <button id="xpdr-mode" title="Cycle OFF / SBY / ALT">SBY</button>
+      </div>
+    </div>
+
+    <div class="panel" id="ptt-panel">
+      <button id="ptt">HOLD TO TALK <span class="key-hint">Space</span></button>
+      <div id="tx-status">&nbsp;</div>
+      <form id="text-form" autocomplete="off">
+        <input id="text-input" placeholder="…or type your radio call" spellcheck="false">
+        <button type="submit">Send</button>
+      </form>
+    </div>
+
+    <div class="panel" id="log-panel">
+      <h3>Comms Log</h3>
+      <div id="log"></div>
+    </div>
+  </aside>
+</main>
+
+<script src="radio.js"></script>
+<script src="map.js"></script>
+<script src="audio.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
