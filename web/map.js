@@ -6,7 +6,10 @@ const GameMap = {
   ctx: null,
   img: null,
   view: "ground",
-  plane: { x: 0.378, y: 0.547, heading: -Math.PI / 2 },
+  // x/y are defaults; init() overwrites them from the brief (NODES["fbo"]).
+  // heading 0 = nose east/right — the parked orientation in the rotated chart
+  // frame (the old portrait "nose up" rotated 90 deg CW); corrected on taxi.
+  plane: { x: 0.445, y: 0.366, heading: 0 },
   patternPoints: {},
   anim: null, // {pts:[{x,y}], seg, segT, speed, resolve}
   SPEEDS: { taxi: 40, roll: 150, fly: 65 }, // px/sec against a 900px reference height

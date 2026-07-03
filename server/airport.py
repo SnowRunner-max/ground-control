@@ -1,12 +1,15 @@
 """KSBA (Santa Barbara Muni) static data.
 
-Ground coordinates are normalized (0..1) against web/assets/ksba-diagram.png.
-Pattern-view coordinates are normalized against an abstract canvas where the
-coastline runs along the bottom and east is to the right.
+Ground coordinates are normalized (0..1) against web/assets/ksba-diagram.svg,
+the cropped and 90-deg-clockwise-rotated FAA diagram (see scripts/prep_map.py
+and server/chart_geometry.py). Pattern-view coordinates are normalized against
+an abstract canvas where the coastline runs along the bottom and east is right.
 
-Note on page orientation: the FAA diagram is drawn with runway 7-25 near
-vertical, so page-up is roughly heading 076 — the 15/33 runways therefore
-slope slightly *up* to the right. All paths below follow the drawn pavement.
+Note on chart orientation: after the rotation, runway 7-25 runs horizontal
+(runway 7 west/left, runway 25 east/right) and page-up is roughly true north
+(~346 deg), so the 15/33 runways slope steeply down to the right. All paths
+below follow the drawn pavement. These coordinates were produced by applying
+chart_geometry.portrait_to_chart to the original portrait-referenced values.
 """
 
 FIELD = {
@@ -36,28 +39,28 @@ FACILITY_NAMES = {
 # ------------------------------------------------------------- ground graph
 
 NODES = {
-    "fbo":        (0.378, 0.547),  # Above All Aviation, south transient GA ramp
-    "ramp_out":   (0.408, 0.524),
-    "hs1":        (0.445, 0.540),  # HS1: hold short of 25 at Charlie
-    "c_h":        (0.423, 0.474),
-    "h_15r":      (0.430, 0.428),  # Hotel crossing runway 15R
-    "h_mid":      (0.434, 0.404),
-    "h_15l":      (0.438, 0.379),  # Hotel crossing runway 15L
-    "h_north":    (0.447, 0.314),
-    "h_top":      (0.452, 0.272),
-    "hs25":       (0.462, 0.262),  # hold short runway 25
-    "rwy25_thr":  (0.469, 0.253),
-    "rwy25_td":   (0.472, 0.310),  # landing touchdown zone
-    "rwy25_exit": (0.480, 0.535),  # rollout point abeam Charlie
-    "c_15r":      (0.387, 0.416),  # Charlie crossing runway 15R
-    "hs15l":      (0.365, 0.399),  # hold short runway 15L at Charlie
-    "rwy15l_thr": (0.351, 0.386),
-    "rwy15l_td":  (0.370, 0.383),
-    "rwy15l_exit": (0.550, 0.353),  # exit right at Mike
-    "m_clear":    (0.545, 0.395),
-    "m_a":        (0.533, 0.508),   # Mike/Alpha junction
-    "a_f":        (0.532, 0.547),   # Alpha/Foxtrot
-    "f_cross":    (0.500, 0.544),   # Foxtrot crossing runway 25
+    "fbo":        (0.445, 0.366),  # Above All Aviation, south transient GA ramp
+    "ramp_out":   (0.472, 0.399),
+    "hs1":        (0.453, 0.439),  # HS1: hold short of 25 at Charlie
+    "c_h":        (0.531, 0.415),
+    "h_15r":      (0.585, 0.423),  # Hotel crossing runway 15R
+    "h_mid":      (0.613, 0.427),
+    "h_15l":      (0.643, 0.432),  # Hotel crossing runway 15L
+    "h_north":    (0.719, 0.442),
+    "h_top":      (0.769, 0.447),
+    "hs25":       (0.780, 0.458),  # hold short runway 25
+    "rwy25_thr":  (0.791, 0.466),
+    "rwy25_td":   (0.724, 0.469),  # landing touchdown zone
+    "rwy25_exit": (0.459, 0.478),  # rollout point abeam Charlie
+    "c_15r":      (0.599, 0.375),  # Charlie crossing runway 15R
+    "hs15l":      (0.619, 0.351),  # hold short runway 15L at Charlie
+    "rwy15l_thr": (0.634, 0.336),
+    "rwy15l_td":  (0.638, 0.357),
+    "rwy15l_exit": (0.673, 0.555),  # exit right at Mike
+    "m_clear":    (0.624, 0.550),
+    "m_a":        (0.491, 0.536),   # Mike/Alpha junction
+    "a_f":        (0.445, 0.535),   # Alpha/Foxtrot
+    "f_cross":    (0.448, 0.500),   # Foxtrot crossing runway 25
 }
 
 
