@@ -27,9 +27,7 @@ const App = {
     document.getElementById("hdr-callsign").textContent = this.brief.callsign;
     document.getElementById("mission-text").textContent = this.brief.mission;
     document.getElementById("atis-text").textContent = this.brief.atis_display || "";
-    document.getElementById("freq-list").innerHTML = Object.entries(this.brief.freqs)
-      .map(([fac, mhz]) => `<span>${fac.toUpperCase()} ${mhz}</span>`)
-      .join("");
+    this.renderChartInfo();
     if (!this.brief.coach) {
       document.getElementById("coach-panel").style.display = "none";
       document.getElementById("atis-details").style.display = "none";
@@ -46,6 +44,58 @@ const App = {
     this.connectWs();
     this.wirePtt();
     this.wireTextForm();
+    this.wireChartInfo();
+  },
+
+  // ---- chart info drawer -----------------------------------------------------
+
+  renderChartInfo() {
+    const ci = this.brief.chart_info;
+    if (!ci) return;
+
+    document.getElementById("ci-freqs").innerHTML = (ci.frequencies || [])
+      .map((f) => `<span><b>${f.label}</b> ${f.value}</span>`)
+      .join("");
+
+    const field = ci.field || {};
+    let html = "";
+    if (field.elevation_ft != null) {
+      html += `<div class="ci-field-row"><span>Field elevation</span><span>${field.elevation_ft} ft</span></div>`;
+    }
+    if (field.pattern_altitude_ft_agl != null) {
+      html += `<div class="ci-field-row"><span>Pattern altitude</span><span>${field.pattern_altitude_ft_agl} ft AGL</span></div>`;
+    }
+    for (const rw of ci.runways || []) {
+      html += `<div class="ci-runway">
+        <div class="ci-runway-id">RWY ${rw.id}</div>
+        <div class="ci-runway-detail">${rw.dimensions_ft} ft</div>
+        <div class="ci-runway-detail">PCN ${rw.pcn}</div>
+        <div class="ci-runway-detail">${rw.strength}</div>
+      </div>`;
+    }
+    document.getElementById("ci-field").innerHTML = html;
+
+    document.getElementById("ci-notes").innerHTML = (ci.notes || [])
+      .map((n) => `<li>${n}</li>`)
+      .join("");
+  },
+
+  toggleChartInfo(force) {
+    const panel = document.getElementById("map-panel");
+    const tab = document.getElementById("chart-info-tab");
+    const open = force !== undefined ? force : !panel.classList.contains("drawer-open");
+    panel.classList.toggle("drawer-open", open);
+    tab.setAttribute("aria-expanded", String(open));
+  },
+
+  wireChartInfo() {
+    const tab = document.getElementById("chart-info-tab");
+    tab.addEventListener("click", () => this.toggleChartInfo());
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "i" && e.key !== "I") return;
+      if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+      this.toggleChartInfo();
+    });
   },
 
   connectWs() {

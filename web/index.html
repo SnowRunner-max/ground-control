@@ -47,13 +47,30 @@
 <main hidden id="game">
   <section id="map-panel">
     <svg id="map" preserveAspectRatio="xMidYMid meet"></svg>
+
+    <button id="chart-info-tab" aria-expanded="false" aria-controls="chart-info-drawer">CHART INFO</button>
+    <div id="chart-info-drawer" class="panel">
+      <div class="ci-body">
+        <section class="ci-section">
+          <h3>Frequencies</h3>
+          <div id="ci-freqs" class="ci-freq-list"></div>
+        </section>
+        <section class="ci-section">
+          <h3>Field &amp; Runways</h3>
+          <div id="ci-field"></div>
+        </section>
+        <section class="ci-section">
+          <h3>Notes</h3>
+          <ul id="ci-notes"></ul>
+        </section>
+      </div>
+    </div>
   </section>
 
   <aside id="sidebar">
     <div class="panel" id="mission-card">
       <h3>Mission</h3>
       <p id="mission-text"></p>
-      <div id="freq-list"></div>
       <details id="atis-details"><summary>ATIS text (cheat)</summary>
         <p id="atis-text"></p></details>
     </div>
