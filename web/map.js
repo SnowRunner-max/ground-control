@@ -1,76 +1,123 @@
-// Map rendering: the FAA airport diagram for ground ops, a stylized coastal
-// view for the airborne legs. Coordinates from the server are normalized 0..1.
+// Map rendering. The ground view is the FAA airport diagram inlined as vector
+// SVG (assets/ksba-diagram.svg — cropped and rotated for widescreen); the
+// airborne legs use a stylized coastal scene built from SVG shapes. The
+// aircraft is a first-class SVG marker moved over the map. Server coordinates
+// are normalized 0..1 and mapped into whichever view's viewBox is active.
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs = {}) => {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+};
+
+// Aircraft silhouette in local units (nose at 0,-1); scaled/rotated per frame.
+const PLANE_PATH =
+  "M0,-1 L0.22,-0.25 L1,0.15 L0.2,0.2 L0.35,0.85 L0,0.7 " +
+  "L-0.35,0.85 L-0.2,0.2 L-1,0.15 L-0.22,-0.25 Z";
 
 const GameMap = {
-  canvas: null,
-  ctx: null,
-  img: null,
+  svg: null,
+  chartLayer: null,   // <g> holding the current scene (chart or coastal)
+  planeEl: null,      // <path> aircraft marker (drawn above the scene)
   view: "ground",
-  // x/y are defaults; init() overwrites them from the brief (NODES["fbo"]).
-  // heading 0 = nose east/right — the parked orientation in the rotated chart
-  // frame (the old portrait "nose up" rotated 90 deg CW); corrected on taxi.
   plane: { x: 0.445, y: 0.366, heading: 0 },
   patternPoints: {},
-  anim: null, // {pts:[{x,y}], seg, segT, speed, resolve}
-  SPEEDS: { taxi: 40, roll: 150, fly: 65 }, // px/sec against a 900px reference height
+  anim: null, // {pts:[{x,y}], seg, t, speed, resolve}
+  SPEEDS: { taxi: 40, roll: 150, fly: 65 }, // units/sec vs a 900-unit reference
 
-  init(canvas, brief) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext("2d");
+  // Ground viewBox is read from the chart SVG on load; the coastal view uses a
+  // fixed widescreen viewBox. Both render with uniform (meet) scaling so the
+  // aircraft marker never distorts.
+  groundVB: { w: 504.4, h: 351.3 },
+  patternVB: { w: 1000, h: 700 },
+  chartReady: false,
+
+  init(svg, brief) {
+    this.svg = svg;
     this.patternPoints = brief.pattern_points || {};
     this.plane.x = brief.plane.pos[0];
     this.plane.y = brief.plane.pos[1];
 
-    this.img = new Image();
-    this.img.src = "assets/ksba-diagram.png";
+    this.chartLayer = el("g");
+    this.planeEl = el("path", {
+      d: PLANE_PATH,
+      fill: "#f5a623",
+      stroke: "#332200",
+      "stroke-width": 0.35,
+      "stroke-linejoin": "round",
+    });
+    this.svg.append(this.chartLayer, this.planeEl);
 
-    const fit = () => {
-      const r = canvas.parentElement.getBoundingClientRect();
-      canvas.width = r.width * devicePixelRatio;
-      canvas.height = r.height * devicePixelRatio;
-    };
-    new ResizeObserver(fit).observe(canvas.parentElement);
-    fit();
+    this.loadChart(); // async; applies the ground scene once ready
+    this.applyScene();
 
     let last = performance.now();
     const loop = (now) => {
       this.tick((now - last) / 1000);
       last = now;
-      this.draw();
+      this.render();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
   },
 
+  async loadChart() {
+    try {
+      const txt = await (await fetch("assets/ksba-diagram.svg")).text();
+      const doc = new DOMParser().parseFromString(txt, "image/svg+xml");
+      const root = doc.documentElement;
+      const vb = (root.getAttribute("viewBox") || "0 0 504.4 351.3")
+        .split(/[\s,]+/).map(Number);
+      this.groundVB = { w: vb[2], h: vb[3] };
+      this.chartNodes = Array.from(root.childNodes)
+        .filter((n) => n.nodeType === 1)
+        .map((n) => document.importNode(n, true));
+      this.chartReady = true;
+      if (this.view === "ground") this.applyScene();
+    } catch (e) {
+      console.error("chart load failed", e);
+    }
+  },
+
   setView(v) {
+    if (v === this.view && this.sceneApplied) return;
     this.view = v;
     document.getElementById("view-label").textContent =
       v === "ground" ? "AIRPORT DIAGRAM" : "AREA · SANTA BARBARA COASTLINE";
+    this.applyScene();
+  },
+
+  vb() {
+    return this.view === "ground" ? this.groundVB : this.patternVB;
+  },
+
+  applyScene() {
+    const vb = this.vb();
+    this.svg.setAttribute("viewBox", `0 0 ${vb.w} ${vb.h}`);
+    this.chartLayer.replaceChildren();
+    if (this.view === "ground") {
+      // the FAA chart assumes paper-white; back it so it reads on the dark panel
+      this.chartLayer.append(el("rect", {
+        x: 0, y: 0, width: vb.w, height: vb.h, fill: "#ffffff",
+      }));
+      if (this.chartReady) this.chartLayer.append(...this.chartNodes);
+    } else {
+      this.buildPattern(this.chartLayer);
+    }
+    this.sceneApplied = true;
   },
 
   // ---- coordinate mapping -------------------------------------------------
 
-  groundRect() {
-    // contain-fit the diagram image
-    const cw = this.canvas.width, ch = this.canvas.height;
-    if (!this.img.naturalWidth) return { x: 0, y: 0, w: cw, h: ch };
-    const s = Math.min(cw / this.img.naturalWidth, ch / this.img.naturalHeight);
-    const w = this.img.naturalWidth * s, h = this.img.naturalHeight * s;
-    return { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
-  },
-
   toPx(nx, ny) {
-    if (this.view === "ground") {
-      const r = this.groundRect();
-      return [r.x + nx * r.w, r.y + ny * r.h];
-    }
-    return [nx * this.canvas.width, ny * this.canvas.height];
+    const vb = this.vb();
+    return [nx * vb.w, ny * vb.h];
   },
 
-  // ---- animation ----------------------------------------------------------
+  // ---- animation (unchanged engine; operates in normalized space) ---------
 
   runActions(actions, onLeg) {
-    // sequentially run move actions; call onLeg(legId) as each named leg finishes
     let p = Promise.resolve();
     for (const a of actions) {
       if (a.type !== "move") continue;
@@ -110,25 +157,25 @@ const GameMap = {
   tick(dt) {
     const a = this.anim;
     if (!a) return;
-    // speed is defined against a 900px-tall reference view
-    let travelPx = a.speed * (this.canvas.height / 900) * dt;
+    // speed is defined against a 900-unit-tall reference view
+    let travel = a.speed * (this.vb().h / 900) * dt;
 
     while (a.seg < a.pts.length - 1) {
       const p0 = a.pts[a.seg], p1 = a.pts[a.seg + 1];
       const [x0, y0] = this.toPx(p0.x, p0.y);
       const [x1, y1] = this.toPx(p1.x, p1.y);
-      const segLenPx = Math.max(Math.hypot(x1 - x0, y1 - y0), 1e-6);
-      if (segLenPx > 1) {
+      const segLen = Math.max(Math.hypot(x1 - x0, y1 - y0), 1e-6);
+      if (segLen > 1) {
         this.plane.heading = Math.atan2(y1 - y0, x1 - x0);
       }
-      const remainPx = segLenPx * (1 - a.t);
-      if (travelPx < remainPx) {
-        a.t += travelPx / segLenPx;
+      const remain = segLen * (1 - a.t);
+      if (travel < remain) {
+        a.t += travel / segLen;
         this.plane.x = p0.x + (p1.x - p0.x) * a.t;
         this.plane.y = p0.y + (p1.y - p0.y) * a.t;
         return;
       }
-      travelPx -= remainPx;
+      travel -= remain;
       a.seg += 1;
       a.t = 0;
     }
@@ -142,104 +189,54 @@ const GameMap = {
 
   // ---- drawing ------------------------------------------------------------
 
-  draw() {
-    const { ctx, canvas } = this;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (this.view === "ground") this.drawGround();
-    else this.drawPattern();
-    this.drawPlane();
+  render() {
+    const [px, py] = this.toPx(this.plane.x, this.plane.y);
+    const deg = this.plane.heading * 180 / Math.PI + 90; // nose (−y) -> heading
+    const s = (this.view === "ground" ? 0.020 : 0.024) * this.vb().h;
+    this.planeEl.setAttribute(
+      "transform", `translate(${px} ${py}) rotate(${deg}) scale(${s})`);
   },
 
-  drawGround() {
-    const { ctx } = this;
-    const r = this.groundRect();
-    ctx.fillStyle = "#e9e6df";
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    if (this.img.naturalWidth) ctx.drawImage(this.img, r.x, r.y, r.w, r.h);
-  },
+  buildPattern(g) {
+    const { w: W, h: H } = this.patternVB;
+    const line = (H * 0.0025);
+    g.append(el("rect", { x: 0, y: 0, width: W, height: H, fill: "#233140" }));
 
-  drawPattern() {
-    const { ctx, canvas } = this;
-    const W = canvas.width, H = canvas.height;
-
-    // sky / land
-    ctx.fillStyle = "#233140";
-    ctx.fillRect(0, 0, W, H);
     // ocean below the coastline
-    const coastY = 0.80;
-    ctx.fillStyle = "#0f3552";
-    ctx.beginPath();
-    ctx.moveTo(0, H * (coastY + 0.02));
-    ctx.bezierCurveTo(W * 0.3, H * (coastY - 0.03), W * 0.6, H * (coastY + 0.03), W, H * (coastY - 0.01));
-    ctx.lineTo(W, H);
-    ctx.lineTo(0, H);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = "#5b7f9c";
-    ctx.lineWidth = 2 * devicePixelRatio;
-    ctx.beginPath();
-    ctx.moveTo(0, H * (coastY + 0.02));
-    ctx.bezierCurveTo(W * 0.3, H * (coastY - 0.03), W * 0.6, H * (coastY + 0.03), W, H * (coastY - 0.01));
-    ctx.stroke();
+    const coast = `M 0 ${H * 0.82} C ${W * 0.3} ${H * 0.77}, ${W * 0.6} ${H * 0.83}, ${W} ${H * 0.79}`;
+    g.append(el("path", { d: `${coast} L ${W} ${H} L 0 ${H} Z`, fill: "#0f3552" }));
+    g.append(el("path", { d: coast, fill: "none", stroke: "#5b7f9c", "stroke-width": line * 2 }));
 
-    ctx.font = `${12 * devicePixelRatio}px ui-monospace, Menlo, monospace`;
-    ctx.fillStyle = "#5b7f9c";
-    ctx.fillText("PACIFIC OCEAN", W * 0.42, H * 0.93);
+    const label = (x, y, t, fill, size = H * 0.02, anchor = "start") => {
+      const n = el("text", {
+        x, y, fill, "font-size": size, "text-anchor": anchor,
+        "font-family": "ui-monospace, Menlo, monospace",
+      });
+      n.textContent = t;
+      g.append(n);
+    };
+    label(W * 0.42, H * 0.93, "PACIFIC OCEAN", "#5b7f9c");
 
     // airport symbol: the two runway orientations
     const ap = this.patternPoints.airport || [0.24, 0.58];
-    const [ax, ay] = this.toPx(ap[0], ap[1]);
-    const L = 22 * devicePixelRatio;
-    ctx.strokeStyle = "#c8d4e0";
-    ctx.lineWidth = 5 * devicePixelRatio;
-    ctx.beginPath(); // 7-25: roughly ENE-WSW
-    ctx.moveTo(ax - L, ay + L * 0.25);
-    ctx.lineTo(ax + L, ay - L * 0.25);
-    ctx.stroke();
-    ctx.lineWidth = 3 * devicePixelRatio;
-    ctx.beginPath(); // 15-33
-    ctx.moveTo(ax - L * 0.3, ay - L * 0.7);
-    ctx.lineTo(ax + L * 0.3, ay + L * 0.7);
-    ctx.stroke();
-    ctx.fillStyle = "#c8d4e0";
-    ctx.fillText("KSBA", ax - L, ay - L);
+    const [ax, ay] = [ap[0] * W, ap[1] * H];
+    const L = H * 0.03;
+    g.append(el("line", {
+      x1: ax - L, y1: ay + L * 0.25, x2: ax + L, y2: ay - L * 0.25,
+      stroke: "#c8d4e0", "stroke-width": line * 5,
+    }));
+    g.append(el("line", {
+      x1: ax - L * 0.3, y1: ay - L * 0.7, x2: ax + L * 0.3, y2: ay + L * 0.7,
+      stroke: "#c8d4e0", "stroke-width": line * 3,
+    }));
+    label(ax - L, ay - L, "KSBA", "#c8d4e0");
 
     // 10-mile east reference
     const e10 = this.patternPoints.east_10mi || [0.86, 0.70];
-    const [ex, ey] = this.toPx(e10[0], e10[1]);
-    ctx.strokeStyle = "#5b7f9c";
-    ctx.lineWidth = devicePixelRatio;
-    ctx.beginPath();
-    ctx.arc(ex, ey, 6 * devicePixelRatio, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = "#5b7f9c";
-    ctx.fillText("10 NM EAST", ex - 34 * devicePixelRatio, ey + 22 * devicePixelRatio);
-  },
-
-  drawPlane() {
-    const { ctx } = this;
-    const [px, py] = this.toPx(this.plane.x, this.plane.y);
-    const s = (this.view === "ground" ? 9 : 12) * devicePixelRatio;
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(this.plane.heading + Math.PI / 2);
-    ctx.beginPath(); // simple aircraft silhouette
-    ctx.moveTo(0, -s);           // nose
-    ctx.lineTo(s * 0.22, -s * 0.25);
-    ctx.lineTo(s, s * 0.15);     // right wing
-    ctx.lineTo(s * 0.2, s * 0.2);
-    ctx.lineTo(s * 0.35, s * 0.85); // right tail
-    ctx.lineTo(0, s * 0.7);
-    ctx.lineTo(-s * 0.35, s * 0.85);
-    ctx.lineTo(-s * 0.2, s * 0.2);
-    ctx.lineTo(-s, s * 0.15);    // left wing
-    ctx.lineTo(-s * 0.22, -s * 0.25);
-    ctx.closePath();
-    ctx.fillStyle = "#f5a623";
-    ctx.strokeStyle = "#332200";
-    ctx.lineWidth = devicePixelRatio;
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    const [ex, ey] = [e10[0] * W, e10[1] * H];
+    g.append(el("circle", {
+      cx: ex, cy: ey, r: H * 0.012, fill: "none", stroke: "#5b7f9c", "stroke-width": line,
+    }));
+    label(ex, ey + H * 0.045, "10 NM EAST", "#5b7f9c", H * 0.02, "middle");
   },
 };
