@@ -81,10 +81,12 @@ const GameMap = {
   },
 
   setView(v) {
-    if (v === this.view && this.sceneApplied) return;
-    this.view = v;
+    // label update is idempotent — do it before the guard so the initial
+    // "AIRPORT DIAGRAM" caption shows even when the scene is already applied.
     document.getElementById("view-label").textContent =
       v === "ground" ? "AIRPORT DIAGRAM" : "AREA · SANTA BARBARA COASTLINE";
+    if (v === this.view && this.sceneApplied) return;
+    this.view = v;
     this.applyScene();
   },
 

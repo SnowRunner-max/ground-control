@@ -201,6 +201,7 @@ def test_static_and_js_assets(app):
         "map.js": "javascript",
         "audio.js": "javascript",
         "assets/ksba-diagram.png": "image/png",
+        "assets/ksba-diagram.svg": "svg",  # the vector chart the map actually loads
     }
     for path, ctype_needle in expected.items():
         resp = httpx.get(f"{app}/{path}")
