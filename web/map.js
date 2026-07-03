@@ -76,7 +76,10 @@ const GameMap = {
       this.chartReady = true;
       if (this.view === "ground") this.applyScene();
     } catch (e) {
-      console.error("chart load failed", e);
+      // fall back to the raster twin so the ground view still shows the chart
+      console.error("chart svg load failed, using png fallback", e);
+      this.chartFallback = true;
+      if (this.view === "ground") this.applyScene();
     }
   },
 
@@ -103,7 +106,13 @@ const GameMap = {
       this.chartLayer.append(el("rect", {
         x: 0, y: 0, width: vb.w, height: vb.h, fill: "#ffffff",
       }));
-      if (this.chartReady) this.chartLayer.append(...this.chartNodes);
+      if (this.chartReady) {
+        this.chartLayer.append(...this.chartNodes);
+      } else if (this.chartFallback) {
+        this.chartLayer.append(el("image", {
+          href: "assets/ksba-diagram.png", x: 0, y: 0, width: vb.w, height: vb.h,
+        }));
+      }
     } else {
       this.buildPattern(this.chartLayer);
     }

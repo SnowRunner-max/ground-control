@@ -28,6 +28,11 @@ FREQS = {
     "approach": 125400,
 }
 
+
+def mhz(khz: int) -> str:
+    """Format a kHz frequency as its MHz display string (e.g. 132650 -> '132.65')."""
+    return f"{khz / 1000:.2f}".rstrip("0").rstrip(".") if khz % 100 else f"{khz / 1000:.1f}"
+
 FACILITY_NAMES = {
     "atis": "Santa Barbara ATIS",
     "clearance": "Santa Barbara Clearance",
@@ -37,16 +42,17 @@ FACILITY_NAMES = {
 }
 
 # Non-critical chart marginalia relocated from the map into the UI drawer,
-# transcribed from the FAA KSBA airport diagram (AL-378). The frequency values
-# mirror FREQS above (kept as printed strings, incl. the tower UHF that the sim
-# radio does not model). Consumed by Mission.brief() as brief["chart_info"].
+# transcribed from the FAA KSBA airport diagram (AL-378). Consumed by
+# Mission.brief() as brief["chart_info"]. Frequencies are derived from FREQS so
+# the drawer can never drift from the sim radio; only the tower UHF (which the
+# sim does not model) is a hand-written suffix.
 CHART_INFO = {
     "frequencies": [
-        {"label": "ATIS", "value": "132.65"},
-        {"label": "Clearance", "value": "132.9"},
-        {"label": "Ground", "value": "121.7"},
-        {"label": "Tower", "value": "119.7 / 254.35"},
-        {"label": "Approach", "value": "125.4"},
+        {"label": "ATIS", "value": mhz(FREQS["atis"])},
+        {"label": "Clearance", "value": mhz(FREQS["clearance"])},
+        {"label": "Ground", "value": mhz(FREQS["ground"])},
+        {"label": "Tower", "value": f"{mhz(FREQS['tower'])} / 254.35"},
+        {"label": "Approach", "value": mhz(FREQS["approach"])},
     ],
     "field": {"elevation_ft": 14, "pattern_altitude_ft_agl": 1000},
     "runways": [

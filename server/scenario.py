@@ -61,8 +61,8 @@ class Step:
     check_xpdr: bool = False
 
 
-def _mhz(khz: int) -> str:
-    return f"{khz / 1000:.2f}".rstrip("0").rstrip(".") if khz % 100 else f"{khz / 1000:.1f}"
+# Single canonical frequency formatter, defined alongside FREQS.
+_mhz = airport.mhz
 
 
 class Mission:

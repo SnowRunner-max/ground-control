@@ -76,6 +76,15 @@ class TestApi:
         assert "READBACK" in notes_blob and "CROSSING" in notes_blob
         assert "12.2" in notes_blob
 
+    def test_chart_info_frequencies_stay_consistent_with_freqs(self):
+        # Guards the FREQS -> CHART_INFO derivation against drift/mislabeling.
+        by_label = {f["label"]: f["value"] for f in airport.CHART_INFO["frequencies"]}
+        assert by_label["ATIS"] == airport.mhz(airport.FREQS["atis"])
+        assert by_label["Clearance"] == airport.mhz(airport.FREQS["clearance"])
+        assert by_label["Ground"] == airport.mhz(airport.FREQS["ground"])
+        assert by_label["Approach"] == airport.mhz(airport.FREQS["approach"])
+        assert by_label["Tower"] == f"{airport.mhz(airport.FREQS['tower'])} / 254.35"
+
     def test_atis_wav(self, client):
         new_mission(client)
         r = client.get("/api/atis.wav")

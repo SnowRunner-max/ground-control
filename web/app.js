@@ -93,6 +93,7 @@ const App = {
     tab.addEventListener("click", () => this.toggleChartInfo());
     window.addEventListener("keydown", (e) => {
       if (e.key !== "i" && e.key !== "I") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // don't hijack Ctrl/Cmd+I
       if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
       this.toggleChartInfo();
     });
