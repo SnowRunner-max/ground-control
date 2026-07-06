@@ -5,12 +5,50 @@ cd "$(dirname "$0")/.."
 
 echo "== Ground Control setup =="
 
-# 1. whisper.cpp (STT) — llama.cpp is assumed installed (brew install llama.cpp)
+OS="$(uname -s)"
+
+# 1. whisper.cpp (STT) — llama.cpp is assumed already installed:
+#    macOS: brew install llama.cpp
+#    Arch:  sudo pacman -S llama-cpp-vulkan (or llama-cpp-rocm for AMD/ROCm)
 if ! command -v whisper-server >/dev/null 2>&1; then
-  echo "-- installing whisper-cpp via Homebrew"
-  brew install whisper-cpp
+  case "$OS" in
+    Darwin)
+      echo "-- installing whisper-cpp via Homebrew"
+      brew install whisper-cpp
+      ;;
+    Linux)
+      if command -v pacman >/dev/null 2>&1; then
+        echo "-- installing whisper-cpp via pacman (whisper-cpp-vulkan)"
+        sudo pacman -S --needed whisper-cpp-vulkan
+      else
+        echo "whisper-server not found and pacman is unavailable."
+        echo "Install whisper.cpp manually: https://github.com/ggml-org/whisper.cpp"
+        exit 1
+      fi
+      ;;
+    *)
+      echo "Unsupported OS: $OS"
+      exit 1
+      ;;
+  esac
 fi
-command -v llama-server >/dev/null 2>&1 || { echo "llama-server not found: brew install llama.cpp"; exit 1; }
+find_llama_server() {
+  command -v llama-server 2>/dev/null && return 0
+  local candidate
+  for candidate in "$HOME/llama.cpp/build/bin/llama-server" /opt/llama.cpp/build/bin/llama-server; do
+    [ -x "$candidate" ] && { echo "$candidate"; return 0; }
+  done
+  return 1
+}
+LLAMA_SERVER_BIN="$(find_llama_server)" || {
+  case "$OS" in
+    Darwin) echo "llama-server not found: brew install llama.cpp" ;;
+    Linux)  echo "llama-server not found: sudo pacman -S llama-cpp-vulkan (or llama-cpp-rocm for AMD/ROCm), or build from source: https://github.com/ggml-org/llama.cpp" ;;
+    *)      echo "llama-server not found: https://github.com/ggml-org/llama.cpp" ;;
+  esac
+  exit 1
+}
+echo "-- found llama-server at $LLAMA_SERVER_BIN"
 
 # 2. Python environment
 command -v uv >/dev/null 2>&1 || { echo "uv not found: https://docs.astral.sh/uv/"; exit 1; }

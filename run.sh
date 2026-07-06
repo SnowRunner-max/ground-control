@@ -8,12 +8,25 @@ LLAMA_PORT="${LLAMA_PORT:-8080}"
 WHISPER_PORT="${WHISPER_PORT:-8081}"
 APP_PORT="${APP_PORT:-8000}"
 
+# llama-server may be on PATH (Homebrew) or in a local build dir (Arch/source).
+find_llama_server() {
+  command -v llama-server 2>/dev/null && return 0
+  local candidate
+  for candidate in "$HOME/llama.cpp/build/bin/llama-server" /opt/llama.cpp/build/bin/llama-server; do
+    [ -x "$candidate" ] && { echo "$candidate"; return 0; }
+  done
+  return 1
+}
+LLAMA_SERVER_BIN="$(find_llama_server)" || {
+  echo "llama-server not found. Run ./scripts/setup.sh first."; exit 1
+}
+
 pids=()
 cleanup() { echo; echo "shutting down"; kill "${pids[@]}" 2>/dev/null || true; wait 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 echo "-- starting llama-server :$LLAMA_PORT"
-llama-server -m models/qwen3-4b-instruct-2507-q4_k_m.gguf \
+"$LLAMA_SERVER_BIN" -m models/qwen3-4b-instruct-2507-q4_k_m.gguf \
   --port "$LLAMA_PORT" -c 4096 -ngl 99 --jinja --log-file logs/llama.log >/dev/null 2>&1 &
 pids+=($!)
 

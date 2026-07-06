@@ -67,6 +67,29 @@ class TestInvariants:
                         f"({item.patterns}) not matched by example -> {norm!r}"
                     )
 
+    def test_examples_satisfy_graders_with_alpha_tail(self):
+        """Tails with letters ('N3083S') must grade like all-digit tails."""
+        for seed in range(10):
+            m = Mission(callsign="N3083S", seed=seed)
+            for step in m.steps.values():
+                norm = normalize(step.example)
+                for item in step.items:
+                    assert item.matches(norm), (
+                        f"seed {seed} step {step.id}: item {item.key!r} "
+                        f"({item.patterns}) not matched by example -> {norm!r}"
+                    )
+
+    def test_spoken_alpha_callsign_passes_clearance_call(self):
+        """Whisper renders 'N3083S' as '... eight three sierra' — must pass."""
+        m = Mission(callsign="N3083S", seed=0)
+        r = m.handle_transmission(
+            airport.FREQS["clearance"],
+            f"Santa Barbara Clearance, Cessna three zero eight three sierra, "
+            f"at Above All Aviation with information {m.wx.letter}, "
+            f"request VFR departure to the east at three thousand five hundred",
+        )
+        assert r["passed"], r["missing"]
+
     def test_atc_spoken_text_contains_key_numbers(self):
         """What ATC says aloud must normalize back to the graded values."""
         for seed in range(20):

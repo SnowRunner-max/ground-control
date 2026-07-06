@@ -14,7 +14,8 @@ PROMPT = (
     "information Bravo, request VFR departure, taxi runway two five via Charlie "
     "Hotel, cross runway one five right, holding short, cleared for takeoff, "
     "squawk four five seven one, departure frequency one two five point four, "
-    "line up and wait, cleared to land, full stop, niner, three mile final."
+    "line up and wait, cleared to land, full stop, niner, three mile final, "
+    "turn right at Mike, taxi to parking via Mike, Alpha, Foxtrot."
 )
 
 

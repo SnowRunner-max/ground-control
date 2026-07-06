@@ -35,6 +35,9 @@ SPOKEN_DIGIT = {
     "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "niner",
 }
 
+# STT homophones: whisper often writes the abbreviation, not the NATO word.
+HOMOPHONES = {"mic": "mike"}
+
 NATO = {
     "a": "alpha", "b": "bravo", "c": "charlie", "d": "delta", "e": "echo",
     "f": "foxtrot", "g": "golf", "h": "hotel", "i": "india", "j": "juliett",
@@ -60,6 +63,7 @@ def normalize(text: str) -> str:
 
     out: list[str] = []
     for i, tok in enumerate(tokens):
+        tok = HOMOPHONES.get(tok, tok)
         if tok in DIGIT_WORDS:
             if tok in AMBIGUOUS:
                 # only digitize when a neighbor is numeric-ish
@@ -117,6 +121,22 @@ def _merge_numbers(tokens: list[str]) -> str:
     # drop boundary markers and any stray trailing periods
     cleaned = (t.rstrip(".") for t in out if t != "|")
     return " ".join(t for t in cleaned if t).strip()
+
+
+def tail_regex(tail: str) -> str:
+    """Regex over normalized() text for a tail number. '3083S' must match
+    both the spoken form '3083 sierra' and the typed form '3083s'."""
+    tail = tail.lower()
+    parts: list[str] = []
+    for ch in tail:
+        if ch.isdigit() and parts and parts[-1].isdigit():
+            parts[-1] += ch
+        else:
+            parts.append(ch if ch.isdigit() else NATO.get(ch, ch))
+    spoken = " ".join(parts)
+    if spoken == tail:
+        return rf"\b{tail}\b"
+    return rf"\b(?:{spoken}|{tail})\b"
 
 
 # ---------------------------------------------------------------- TTS side

@@ -1,7 +1,10 @@
 """Normalization (speech -> canonical) and verbalization (canonical -> spoken)."""
 
+import re
+
 from server.phraseology import (
     normalize, say_altitude, say_callsign, say_digits, say_freq, say_runway,
+    tail_regex,
 )
 
 
@@ -37,6 +40,21 @@ class TestNormalize:
         # "to"/"for" must not digitize when used as words
         n = normalize("taxi to runway two five")
         assert "taxi to runway 25" in n
+
+    def test_tail_regex_spoken_and_typed(self):
+        pat = tail_regex("3083S")
+        assert re.search(pat, normalize("Cessna three zero eight three sierra"))
+        assert re.search(pat, normalize("Cessna 3083S"))
+        short = tail_regex("83S")
+        assert re.search(short, normalize("Cessna eight three sierra"))
+        # all-digit tails keep working
+        assert re.search(tail_regex("67525"), normalize("Cessna six seven five two five"))
+
+    def test_mic_resolves_to_mike(self):
+        # whisper transcribes spoken "Mike" as "mic"; taxiway M readbacks
+        # must still match \bmike\b
+        assert "right at mike" in normalize("Turn right at mic, ground point seven")
+        assert "via mike alpha foxtrot" in normalize("taxi via mic, alpha, foxtrot")
 
     def test_hyphenated(self):
         assert "straight in" in normalize("make straight-in runway two five")

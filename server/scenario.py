@@ -24,7 +24,7 @@ from . import airport
 from .atis import Weather, atis_display, atis_spoken, make_weather
 from .phraseology import (
     normalize, say_altitude, say_callsign, say_digits, say_freq,
-    say_letter, say_runway, say_wind,
+    say_letter, say_runway, say_wind, tail_regex,
 )
 
 
@@ -107,7 +107,7 @@ class Mission:
 
     def _item_callsign(self) -> Item:
         return Item("callsign", "your callsign",
-                    [rf"\b{self.tail}\b", rf"\b{self.tail_short}\b"])
+                    [tail_regex(self.tail), tail_regex(self.tail_short)])
 
     def atis_text(self) -> tuple[str, str]:
         return atis_display(self.wx, self.runway), atis_spoken(self.wx, self.runway)
