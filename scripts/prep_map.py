@@ -27,9 +27,14 @@ import fitz  # pymupdf
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from server.chart_geometry import NEATLINE, REDACTIONS  # noqa: E402
+from server.chart_geometry import (  # noqa: E402
+    CHART_CYCLE,
+    CHART_SOURCE_FILE,
+    NEATLINE,
+    REDACTIONS,
+)
 
-PDF = ROOT / "FlightAware_SBA_APD_AIRPORT DIAGRAM.PDF"
+PDF = ROOT / CHART_SOURCE_FILE
 OUT_SVG = ROOT / "web" / "assets" / "ksba-diagram.svg"
 OUT_PNG = ROOT / "web" / "assets" / "ksba-diagram.png"
 
@@ -42,11 +47,14 @@ def main() -> None:
     #    white diagram background makes the rects vanish. Done first, in the
     #    original (unrotated, uncropped) page coordinate space.
     for rect in REDACTIONS:
-        page.add_redact_annot(fitz.Rect(*rect))
-    # LINE_ART_REMOVE_IF_COVERED also drops vector marginalia fully inside a
-    # rect (e.g. the magnetic-variation arrow) without touching the lat/lon
-    # graticule, whose long lines merely pass through and are never covered.
-    page.apply_redactions(graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED)
+        page.add_redact_annot(
+            fitz.Rect(*rect), fill=(1, 1, 1), cross_out=False,
+        )
+    # FAA cycle 2607 groups geographically separate chart strokes into shared
+    # vector drawings. Removing an intersecting drawing can therefore erase
+    # unrelated airfield pavement. Retain line art and cover the marginalia
+    # with each annotation's white fill instead.
+    page.apply_redactions(graphics=fitz.PDF_REDACT_LINE_ART_NONE)
 
     # 2. Crop to the neatline, then 3. rotate 90 CW. set_cropbox is applied in
     #    unrotated page coords, which is what NEATLINE is measured in.
@@ -63,7 +71,7 @@ def main() -> None:
     pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
     pix.save(OUT_PNG)
 
-    print(f"wrote {OUT_SVG}")
+    print(f"wrote {OUT_SVG} from FAA cycle {CHART_CYCLE}")
     print(f"wrote {OUT_PNG} ({pix.width}x{pix.height}, aspect {pix.width / pix.height:.3f})")
 
 

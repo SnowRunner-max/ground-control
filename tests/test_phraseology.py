@@ -2,6 +2,8 @@
 
 import re
 
+import pytest
+
 from server.phraseology import (
     normalize, say_altitude, say_callsign, say_digits, say_freq, say_runway,
     tail_regex,
@@ -55,6 +57,13 @@ class TestNormalize:
         # must still match \bmike\b
         assert "right at mike" in normalize("Turn right at mic, ground point seven")
         assert "via mike alpha foxtrot" in normalize("taxi via mic, alpha, foxtrot")
+
+    @pytest.mark.parametrize("spoken", ["X-ray", "X ray"])
+    def test_xray_variants(self, spoken):
+        assert normalize(f"information {spoken}") == "information xray"
+
+    def test_juliet_variant(self):
+        assert normalize("information Juliet") == "information juliett"
 
     def test_hyphenated(self):
         assert "straight in" in normalize("make straight-in runway two five")

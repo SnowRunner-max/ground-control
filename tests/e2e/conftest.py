@@ -24,6 +24,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 LLAMA_URL = os.environ.get("LLAMA_URL", "http://127.0.0.1:8080")
 WHISPER_URL = os.environ.get("WHISPER_URL", "http://127.0.0.1:8081")
+REQUIRE_LIVE = os.environ.get("GROUND_CONTROL_REQUIRE_E2E") == "1"
 
 
 def _up(url: str) -> bool:
@@ -48,8 +49,11 @@ def stack():
     if not _up(f"{WHISPER_URL}/"):
         missing.append(f"whisper-server ({WHISPER_URL})")
     if missing:
-        pytest.skip("e2e stack not running: " + ", ".join(missing)
-                    + " — start it with ./run.sh", allow_module_level=False)
+        message = ("e2e stack not running: " + ", ".join(missing)
+                   + " — start it with ./run.sh or ./scripts/test_live.sh")
+        if REQUIRE_LIVE:
+            pytest.fail(message, pytrace=False)
+        pytest.skip(message, allow_module_level=False)
 
 
 @pytest.fixture(scope="session")

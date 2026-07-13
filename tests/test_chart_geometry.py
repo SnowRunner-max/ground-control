@@ -3,11 +3,24 @@ airport ground coordinates onto the cropped, 90-deg-CW-rotated diagram."""
 
 from __future__ import annotations
 
-import math
+from hashlib import sha256
+from pathlib import Path
 
+import fitz
 import pytest
 
-from server.chart_geometry import NEATLINE, PAGE_H, PAGE_W, portrait_to_chart
+from server.chart_geometry import (
+    CHART_CYCLE,
+    CHART_EFFECTIVE,
+    CHART_SOURCE_FILE,
+    CHART_SOURCE_SHA256,
+    NEATLINE,
+    PAGE_H,
+    PAGE_W,
+    portrait_to_chart,
+)
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def _neatline_norm(px: float, py: float) -> tuple[float, float]:
@@ -61,7 +74,34 @@ def test_runway_7_25_becomes_horizontal():
 
 
 def test_outputs_stay_in_unit_square_for_airfield_nodes():
-    from server.airport import NODES  # migrated values, must remain normalized
-    for name, (x, y) in NODES.items():
+    from server.ground import GROUND_NODES
+    for name, node in GROUND_NODES.items():
+        x, y = node.position
         assert 0.0 <= x <= 1.0, name
         assert 0.0 <= y <= 1.0, name
+
+
+def test_checked_in_chart_source_matches_configured_cycle():
+    source = ROOT / CHART_SOURCE_FILE
+    assert source.is_file()
+    assert sha256(source.read_bytes()).hexdigest() == CHART_SOURCE_SHA256
+
+    with fitz.open(source) as doc:
+        chart_text = " ".join(doc[0].get_text().split())
+    assert CHART_CYCLE == "2607"
+    assert "09 JUL 2026 to 06 AUG 2026" in chart_text
+    assert CHART_EFFECTIVE == "09 JUL 2026 to 06 AUG 2026"
+
+
+def test_neatline_matches_current_faa_source():
+    with fitz.open(ROOT / CHART_SOURCE_FILE) as doc:
+        largest = max(doc[0].get_drawings(), key=lambda drawing: drawing["rect"].get_area())
+    assert tuple(largest["rect"]) == pytest.approx(NEATLINE, abs=0.05)
+
+
+def test_above_all_node_is_on_north_ramp():
+    from server.ground import GROUND_NODES
+
+    x, y = GROUND_NODES["above_all_parking"].position
+    assert 0.64 <= x <= 0.72
+    assert 0.18 <= y <= 0.29

@@ -124,7 +124,7 @@ def test_sequential_digit_critical_readbacks(api):
         f"ground_call failed: transcript={result.get('transcript')!r} "
         f"missing={result.get('missing')!r}")
 
-    # 4. ground taxi readback: route letters (Charlie/Hotel) + runway crossings
+    # 4. ground taxi readback: current route identifiers (C/F/B/B1 or C/E)
     step = debug_step(api)
     assert step["step_id"] == "ground_readback"
     result = transmit_voice(api, step["freq_khz"], step["example"])

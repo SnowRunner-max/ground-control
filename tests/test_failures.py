@@ -1,4 +1,6 @@
-"""Failure paths: wrong frequency, bad readbacks, transponder, say-again, scoring."""
+"""Failure paths: frequency, readbacks, state integrity, and scoring."""
+
+import pytest
 
 from server import airport
 from server.scenario import Mission
@@ -8,6 +10,23 @@ from .conftest import find_seed
 
 def make_mission(**kw) -> Mission:
     return Mission(seed=find_seed(**kw))
+
+
+def advance_to(m: Mission, target: str) -> None:
+    """Drive ideal calls and movement acknowledgements up to ``target``."""
+    for _ in range(30):
+        if m.current == target:
+            return
+        step = m.step()
+        result = m.handle_transmission(
+            airport.FREQS[step.facility], step.example, m.squawk, "ALT")
+        assert result["passed"] is True, (step.id, result["missing"])
+        if result["push"]:
+            assert m.apply_push(result["push"]) is not None
+        for action in result["actions"]:
+            if action.get("leg"):
+                m.leg_complete(action["leg"])
+    raise AssertionError(f"mission never reached {target}")
 
 
 class TestWrongFrequency:
@@ -82,6 +101,128 @@ class TestBadReadbacks:
         m = make_mission(config="25")
         r = m.handle_transmission(airport.FREQS["clearance"], "Cessna 525, hi")
         assert m.steps["clearance_call"].example.split(",")[0] in r["coach"]
+
+    def test_taxi_out_requires_complete_current_route(self):
+        m = make_mission(config="25", luaw=False)
+        advance_to(m, "ground_readback")
+        result = m.handle_transmission(
+            airport.FREQS["ground"],
+            f"Runway 25 via Charlie Foxtrot Bravo, Cessna {m.tail_short}.",
+            m.squawk,
+            "ALT",
+        )
+        assert result["passed"] is False
+        assert any("bravo one" in item.lower() for item in result["missing"])
+
+    def test_taxi_in_requires_every_explicit_runway_crossing(self):
+        m = make_mission(config="25", luaw=False)
+        advance_to(m, "taxi_in_readback")
+        result = m.handle_transmission(
+            airport.FREQS["ground"],
+            f"Taxi to Above All via Charlie, Cessna {m.tail_short}.",
+            m.squawk,
+            "ALT",
+        )
+        assert result["passed"] is False
+        missing = " ".join(result["missing"]).lower()
+        assert "15 right" in missing
+        assert "15 left" in missing
+
+    @pytest.mark.parametrize(
+        ("config", "luaw", "target", "bad_call", "missing"),
+        [
+            ("25", False, "clearance_readback",
+             lambda m: (f"Maintain VFR 2,500, departure frequency 125.4, "
+                        f"squawk {m.squawk}, Cessna {m.tail_short}."),
+             "at or below"),
+            ("25", False, "tower_checkin",
+             lambda m: (f"Santa Barbara Tower, Cessna {m.tail}, "
+                        "ready for departure."),
+             "holding short"),
+            ("25", True, "luaw_readback",
+             lambda m: f"Line up and wait, Cessna {m.tail_short}.",
+             "runway"),
+            ("25", False, "takeoff_readback",
+             lambda m: (f"Cleared for takeoff Runway {m.runway}, "
+                        f"Cessna {m.tail_short}."),
+             "left turn"),
+            ("25", False, "dep_ack",
+             lambda m: f"Own navigation, Cessna {m.tail_short}.",
+             "2,500"),
+            ("25", False, "arrival_readback",
+             lambda m: (f"Straight-in Runway {m.runway}, "
+                        f"Cessna {m.tail_short}."),
+             "three mile"),
+            ("25", False, "landing_readback",
+             lambda m: f"Cleared to land, Cessna {m.tail_short}.",
+             "runway"),
+        ],
+    )
+    def test_safety_critical_omissions_fail(
+            self, config, luaw, target, bad_call, missing):
+        m = make_mission(config=config, luaw=luaw)
+        advance_to(m, target)
+        step = m.step()
+        result = m.handle_transmission(
+            airport.FREQS[step.facility], bad_call(m), m.squawk, "ALT")
+        assert result["passed"] is False
+        assert any(missing in item.lower() for item in result["missing"])
+        assert m.current == target
+
+
+class TestStateIntegrity:
+    def test_luaw_waits_for_clearance_and_stale_push_cannot_rewind(self):
+        m = make_mission(config="25", luaw=True)
+        advance_to(m, "luaw_readback")
+
+        luaw = m.handle_transmission(
+            airport.FREQS["tower"], m.step().example, m.squawk, "ALT")
+        assert luaw["passed"] is True
+        assert m.current == "takeoff_readback"
+        assert m.awaiting_takeoff_clearance is True
+        score_count = len(m.scores)
+
+        early = m.handle_transmission(
+            airport.FREQS["tower"], m.step().example, m.squawk, "ALT")
+        assert early["passed"] is None
+        assert len(m.scores) == score_count
+        assert m.attempts_failed == 0
+        assert m.current == "takeoff_readback"
+
+        assert m.apply_push(luaw["push"]) is not None
+        assert m.awaiting_takeoff_clearance is False
+        takeoff = m.handle_transmission(
+            airport.FREQS["tower"], m.step().example, m.squawk, "ALT")
+        assert takeoff["passed"] is True
+        assert m.current == "handoff_readback"
+        assert m.apply_push(luaw["push"]) is None
+        assert m.current == "handoff_readback"
+
+    def test_only_issued_movement_legs_are_accepted_once(self):
+        m = make_mission(config="25", luaw=False)
+        assert m.leg_complete("taxi_in") is None
+        assert m.complete is False
+
+        advance_to(m, "ground_readback")
+        result = m.handle_transmission(
+            airport.FREQS["ground"], m.step().example, m.squawk, "ALT")
+        assert result["passed"] is True
+        assert "taxi_out" in m.pending_legs
+        assert m.leg_complete("taxi_out") is not None
+        assert m.leg_complete("taxi_out") is None
+
+    def test_issued_leg_becomes_stale_after_state_advances(self):
+        m = make_mission(config="25", luaw=False)
+        advance_to(m, "ground_readback")
+        taxi = m.handle_transmission(
+            airport.FREQS["ground"], m.step().example, m.squawk, "ALT")
+        assert taxi["passed"] is True
+        assert "taxi_out" in m.pending_legs
+
+        tower = m.handle_transmission(
+            airport.FREQS["tower"], m.step().example, m.squawk, "ALT")
+        assert tower["passed"] is True
+        assert m.leg_complete("taxi_out") is None
 
 
 class TestSayAgain:

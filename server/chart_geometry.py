@@ -1,6 +1,6 @@
 """Geometry for adapting the FAA KSBA portrait airport diagram to the map.
 
-The published diagram (``FlightAware_SBA_APD_AIRPORT DIAGRAM.PDF``) is drawn
+The published diagram (``FAA_KSBA_APD_2607.pdf``) is drawn
 landscape but printed portrait: page-up is roughly true heading 076. For a
 widescreen map we crop to the neatline and rotate the page 90 degrees
 clockwise, which makes runway 7-25 horizontal and every interior label read
@@ -8,13 +8,20 @@ upright.
 
 This module is the single source of truth for that adaptation: the crop box,
 the marginalia redaction rectangles, and the coordinate transform. It is used
-both by ``scripts/prep_map.py`` (to render the chart asset) and by the one-off
-migration that rebased ``server.airport.NODES`` onto the new frame; keeping the
+both by ``scripts/prep_map.py`` (to render the chart asset) and by the ground
+graph in ``server.ground``; keeping the
 constants here lets the transform be unit-tested. All rectangles are in
 portrait PDF points; ``portrait_to_chart`` works in normalized (0..1) space.
 """
 
 from __future__ import annotations
+
+# Keep the checked-in chart source and UI currency notice tied to one release.
+CHART_CYCLE = "2607"
+CHART_EFFECTIVE = "09 JUL 2026 to 06 AUG 2026"
+CHART_SOURCE_FILE = "FAA_KSBA_APD_2607.pdf"
+CHART_SOURCE_URL = "https://aeronav.faa.gov/d-tpp/2607/00378AD.PDF"
+CHART_SOURCE_SHA256 = "e146968bbd25f886b3e16ecae8816590cf2f1224c39173fb122d4e3639aa9de2"
 
 # Portrait page size of the source PDF, in PDF points.
 PAGE_W = 387.36
@@ -29,10 +36,10 @@ NEATLINE = (18.0, 44.9, 369.3, 549.3)  # x0, y0, x1, y1
 # airfield linework (nodes span roughly x[136,213], y[150,325] in page points).
 # Their content is relocated into the UI chart-info drawer.
 REDACTIONS = (
-    (18.0, 470.0, 89.0, 547.0),    # comm frequency block + tower name (bottom-left)
-    (240.0, 286.0, 309.0, 366.0),  # runway PCN / dimensions data table
-    (322.0, 214.0, 342.0, 458.0),  # runway-crossing caution note
-    (243.0, 460.0, 340.0, 545.0),  # magnetic-variation arrow + annual-rate note
+    (18.0, 470.0, 84.5, 547.0),    # comm frequency block + tower name (bottom-left)
+    (240.0, 415.0, 315.0, 502.0),  # runway PCR / dimensions data table
+    (326.0, 230.0, 351.0, 532.0),  # runway-crossing caution note
+    (250.0, 45.0, 350.0, 135.0),   # magnetic-variation arrow + annual-rate note
 )
 
 

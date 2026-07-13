@@ -1,6 +1,6 @@
 """Full-mission happy paths and mission invariants."""
 
-from server import airport
+from server import airport, ground
 from server.phraseology import normalize
 from server.scenario import Mission
 
@@ -51,6 +51,59 @@ class TestHappyPath:
                 m.apply_push(r["push"])
         push = m.leg_complete("landing_roll")
         assert "contact ground" in push["atc"].display.lower()
+
+    def test_current_routes_drive_phraseology_and_movement(self, mission25, mission15):
+        for mission in (mission25, mission15):
+            taxi_out = mission.taxi_out_route
+            taxi_in = mission.taxi_in_route
+            runway_op = mission.runway_operation
+
+            assert mission.steps["ground_call"].atc.display.endswith(
+                taxi_out.display_instruction)
+            assert mission.steps["ground_readback"].actions[0]["path"] == taxi_out.path
+            assert mission.steps["ground_inbound"].atc.display.endswith(
+                taxi_in.display_instruction)
+            assert mission.steps["taxi_in_readback"].actions[0]["path"] == taxi_in.path
+            assert mission.steps["exit_readback"].actions[0]["path"] == runway_op.exit_path
+
+    def test_no_legacy_taxiway_phraseology_remains(self, mission25, mission15):
+        taxi_text = " ".join(
+            step.example
+            for mission in (mission25, mission15)
+            for step in (
+                mission.steps["ground_readback"],
+                mission.steps["exit_readback"],
+                mission.steps["taxi_in_readback"],
+            )
+        ).lower()
+        assert "hotel" not in taxi_text
+        assert "mike" not in taxi_text
+        assert "alpha" not in taxi_text
+
+    def test_every_same_view_movement_action_is_continuous(
+            self, mission25, mission25_luaw, mission15):
+        for mission in (mission25, mission25_luaw, mission15):
+            brief = mission.brief()["plane"]
+            current_view = brief["view"]
+            current_position = tuple(brief["pos"])
+
+            for step in mission.steps.values():
+                for action in step.actions:
+                    if action.get("type") != "move" or not action.get("path"):
+                        continue
+                    path = tuple(tuple(point) for point in action["path"])
+                    if action["view"] == current_view:
+                        assert path[0] == current_position, (
+                            mission.runway, step.id, current_position, path[0]
+                        )
+                    else:
+                        current_view = action["view"]
+                    assert all(
+                        first != second
+                        for first, second in zip(path, path[1:])
+                    ), (mission.runway, step.id, path)
+                    current_position = path[-1]
+                    assert action["speed"] in {"taxi", "roll", "fly"}
 
 
 class TestInvariants:
@@ -114,19 +167,38 @@ class TestInvariants:
             assert m.wx.letter.title() in display
             assert m.wx.letter in spoken
 
-    def test_wind_favors_the_active_runway(self):
+    def test_weather_matches_the_recorded_runway_selection(self):
         for seed in range(30):
             m = Mission(seed=seed)
-            lo, hi = m.cfg["wind_dir"]
-            assert lo <= m.wx.wind_dir <= hi
+            selection = m.runway_selection
+            assert selection.wind_dir == m.wx.wind_dir
+            assert selection.wind_speed == m.wx.wind_speed
+            assert selection.selected_runway == m.runway
+            selected = next(
+                candidate for candidate in selection.candidates
+                if candidate.runway == m.runway
+            )
+            assert selected.eligible
 
     def test_brief_shape(self):
         b = Mission(seed=1).brief()
-        assert b["plane"]["pos"] == list(airport.NODES["fbo"])
+        assert b["plane"]["pos"] == list(
+            ground.GROUND_NODES["above_all_parking"].position)
         assert set(b["freqs"]) == {"atis", "clearance", "ground", "tower", "approach"}
         assert "132.65" == b["freqs"]["atis"]
 
     def test_paths_are_normalized_coords(self):
-        for cfg in airport.CONFIGS.values():
-            for pt in cfg["taxi_out"]["path"]:
+        paths = [route.path for route in ground.CANONICAL_TAXI_ROUTES.values()]
+        paths.extend(
+            path
+            for operation in ground.RUNWAY_OPERATIONS.values()
+            for path in (
+                operation.line_up_path,
+                operation.takeoff_roll_path,
+                operation.landing_roll_path,
+                operation.exit_path,
+            )
+        )
+        for path in paths:
+            for pt in path:
                 assert 0 <= pt[0] <= 1 and 0 <= pt[1] <= 1

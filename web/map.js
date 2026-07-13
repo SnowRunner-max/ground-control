@@ -21,10 +21,13 @@ const GameMap = {
   chartLayer: null,   // <g> holding the current scene (chart or coastal)
   planeEl: null,      // <path> aircraft marker (drawn above the scene)
   view: "ground",
-  plane: { x: 0.445, y: 0.366, heading: 0 },
+  // Position is intentionally unset until init() receives the mission brief.
+  plane: { x: null, y: null, heading: 0 },
   patternPoints: {},
   anim: null, // {pts:[{x,y}], seg, t, speed, resolve}
+  actionQueue: Promise.resolve(),
   SPEEDS: { taxi: 40, roll: 150, fly: 65 }, // units/sec vs a 900-unit reference
+  CONTINUITY_TOLERANCE_PX: 2,
 
   // Ground viewBox is read from the chart SVG on load; the coastal view uses a
   // fixed widescreen viewBox. Both render with uniform (meet) scaling so the
@@ -34,10 +37,20 @@ const GameMap = {
   chartReady: false,
 
   init(svg, brief) {
+    const initial = brief && brief.plane;
+    if (!initial || !this.validPoint(initial.pos)) {
+      throw new Error("Mission brief is missing a valid aircraft position.");
+    }
+    if (!this.validView(initial.view)) {
+      throw new Error(`Mission brief has an invalid map view: ${initial.view}`);
+    }
     this.svg = svg;
     this.patternPoints = brief.pattern_points || {};
-    this.plane.x = brief.plane.pos[0];
-    this.plane.y = brief.plane.pos[1];
+    this.view = initial.view;
+    this.plane.x = initial.pos[0];
+    this.plane.y = initial.pos[1];
+    this.plane.heading = 0;
+    this.actionQueue = Promise.resolve();
 
     this.chartLayer = el("g");
     this.planeEl = el("path", {
@@ -84,6 +97,7 @@ const GameMap = {
   },
 
   setView(v) {
+    if (!this.validView(v)) throw new Error(`Unknown map view: ${v}`);
     // label update is idempotent — do it before the guard so the initial
     // "AIRPORT DIAGRAM" caption shows even when the scene is already applied.
     document.getElementById("view-label").textContent =
@@ -126,31 +140,72 @@ const GameMap = {
     return [nx * vb.w, ny * vb.h];
   },
 
-  // ---- animation (unchanged engine; operates in normalized space) ---------
+  // ---- animation and continuity (operates in normalized space) ------------
+
+  validView(view) {
+    return view === "ground" || view === "pattern";
+  },
+
+  validPoint(point) {
+    return Array.isArray(point) && point.length === 2
+      && point.every((value) => Number.isFinite(value) && value >= 0 && value <= 1);
+  },
+
+  continuityErrorPx(point) {
+    const [currentX, currentY] = this.toPx(this.plane.x, this.plane.y);
+    const [startX, startY] = this.toPx(point[0], point[1]);
+    return Math.hypot(startX - currentX, startY - currentY);
+  },
+
+  prepareMove(action) {
+    if (!this.validView(action.view)) {
+      throw new Error(`Movement action has an invalid view: ${action.view}`);
+    }
+    const path = action.path || [];
+    if (!Array.isArray(path) || !path.every((point) => this.validPoint(point))) {
+      throw new Error("Movement action contains an invalid path.");
+    }
+
+    const changedView = action.view !== this.view;
+    this.setView(action.view);
+    if (!path.length) return path;
+
+    if (changedView) {
+      // Ground and pattern coordinates are different spaces. Repositioning is
+      // explicit and permitted only at this view transition.
+      this.plane.x = path[0][0];
+      this.plane.y = path[0][1];
+      return path;
+    }
+
+    if (!this.validPoint([this.plane.x, this.plane.y])) {
+      throw new Error("Aircraft position is not initialized.");
+    }
+    const errorPx = this.continuityErrorPx(path[0]);
+    if (errorPx > this.CONTINUITY_TOLERANCE_PX) {
+      throw new Error(
+        `Movement discontinuity in ${action.view} view (${errorPx.toFixed(1)} px).`);
+    }
+    return path;
+  },
 
   runActions(actions, onLeg) {
-    let p = Promise.resolve();
-    for (const a of actions) {
-      if (a.type !== "move") continue;
-      p = p.then(() => {
-        this.setView(a.view);
-        if (!a.path || a.path.length < 2) {
-          if (a.path && a.path.length) {
-            this.plane.x = a.path[a.path.length - 1][0];
-            this.plane.y = a.path[a.path.length - 1][1];
+    for (const action of actions) {
+      if (action.type !== "move") continue;
+      this.actionQueue = this.actionQueue.then(async () => {
+        const path = this.prepareMove(action);
+        if (path.length < 2) {
+          if (path.length) {
+            this.plane.x = path[0][0];
+            this.plane.y = path[0][1];
           }
-          if (a.leg && onLeg) onLeg(a.leg);
-          return;
+        } else {
+          await this.animatePath(path, action.speed);
         }
-        // teleport to path start (view switches between ground/pattern spaces)
-        this.plane.x = a.path[0][0];
-        this.plane.y = a.path[0][1];
-        return this.animatePath(a.path, a.speed).then(() => {
-          if (a.leg && onLeg) onLeg(a.leg);
-        });
+        if (action.leg && onLeg) onLeg(action.leg);
       });
     }
-    return p;
+    return this.actionQueue;
   },
 
   animatePath(path, speed) {
@@ -251,3 +306,7 @@ const GameMap = {
     label(ex, ey + H * 0.045, "10 NM EAST", "#5b7f9c", H * 0.02, "middle");
   },
 };
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { GameMap };
+}

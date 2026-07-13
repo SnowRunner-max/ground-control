@@ -36,7 +36,7 @@ SPOKEN_DIGIT = {
 }
 
 # STT homophones: whisper often writes the abbreviation, not the NATO word.
-HOMOPHONES = {"mic": "mike"}
+HOMOPHONES = {"mic": "mike", "juliet": "juliett"}
 
 NATO = {
     "a": "alpha", "b": "bravo", "c": "charlie", "d": "delta", "e": "echo",
@@ -51,6 +51,8 @@ NATO = {
 def normalize(text: str) -> str:
     """Canonicalize a transcript for pattern matching."""
     text = text.lower()
+    # Whisper commonly hyphenates or spaces the NATO word "Xray".
+    text = re.sub(r"\bx[\s-]+ray\b", "xray", text)
     text = re.sub(r"(?<=\d),(?=\d)", "", text)  # 3,500 -> 3500 (before ',' is stripped)
     # clause punctuation becomes a boundary token so digit groups on either
     # side never merge ("Cessna 525, three mile final" != "5253 mile final")

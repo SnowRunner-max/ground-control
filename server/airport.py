@@ -12,6 +12,8 @@ below follow the drawn pavement. These coordinates were produced by applying
 chart_geometry.portrait_to_chart to the original portrait-referenced values.
 """
 
+from .chart_geometry import CHART_CYCLE, CHART_EFFECTIVE, CHART_SOURCE_URL
+
 FIELD = {
     "id": "KSBA",
     "name": "Santa Barbara Municipal",
@@ -57,51 +59,22 @@ CHART_INFO = {
     "field": {"elevation_ft": 14, "pattern_altitude_ft_agl": 1000},
     "runways": [
         {"id": "7-25", "dimensions_ft": "6052 x 150",
-         "pcn": "66 F/A/X/U", "strength": "S-110, D-160, 2D-245"},
-        {"id": "15L-33R", "dimensions_ft": "4184 x 100",
-         "pcn": "14 F/A/X/T", "strength": "S-35, D-41, 2D-63"},
-        {"id": "15R-33L", "dimensions_ft": "4180 x 75",
-         "pcn": "19 F/A/X/U", "strength": "S-48, D-63, 2D-100"},
+         "pavement_rating": "PCR 658 F/D/X/T", "strength": "S-113, D-188, 2D-318"},
+        {"id": "15L-33R", "dimensions_ft": "4180 x 75",
+         "pavement_rating": "PCR 45 F/D/X/T", "strength": "S-39, D-61, 2D-108"},
+        {"id": "15R-33L", "dimensions_ft": "4184 x 100",
+         "pavement_rating": "PCR 45 F/D/X/T", "strength": "S-25, D-39"},
     ],
     "notes": [
         "CAUTION: Be alert to runway crossing clearances. Readback of all "
         "runway holding instructions is required.",
-        "Magnetic variation 12.2° E (annual rate of change 0.1° W, Jan 2020).",
-        "FAA airport diagram AL-378, effective 22 FEB 2024 to 21 MAR 2024.",
+        "SAID in use. Operate transponders with altitude reporting mode and "
+        "ADS-B (if equipped) enabled on all airport surfaces.",
+        "Magnetic variation 14° E (annual rate of change 0.0° W, Jan 1985).",
+        f"FAA airport diagram AL-378, cycle {CHART_CYCLE}, effective {CHART_EFFECTIVE}.",
+        f"Source: {CHART_SOURCE_URL}",
     ],
 }
-
-# ------------------------------------------------------------- ground graph
-
-NODES = {
-    "fbo":        (0.445, 0.366),  # Above All Aviation, south transient GA ramp
-    "ramp_out":   (0.472, 0.399),
-    "hs1":        (0.453, 0.439),  # HS1: hold short of 25 at Charlie
-    "c_h":        (0.531, 0.415),
-    "h_15r":      (0.585, 0.423),  # Hotel crossing runway 15R
-    "h_mid":      (0.613, 0.427),
-    "h_15l":      (0.643, 0.432),  # Hotel crossing runway 15L
-    "h_north":    (0.719, 0.442),
-    "h_top":      (0.769, 0.447),
-    "hs25":       (0.780, 0.458),  # hold short runway 25
-    "rwy25_thr":  (0.791, 0.466),
-    "rwy25_td":   (0.724, 0.469),  # landing touchdown zone
-    "rwy25_exit": (0.459, 0.478),  # rollout point abeam Charlie
-    "c_15r":      (0.599, 0.375),  # Charlie crossing runway 15R
-    "hs15l":      (0.619, 0.351),  # hold short runway 15L at Charlie
-    "rwy15l_thr": (0.634, 0.336),
-    "rwy15l_td":  (0.638, 0.357),
-    "rwy15l_exit": (0.673, 0.555),  # exit right at Mike
-    "m_clear":    (0.624, 0.550),
-    "m_a":        (0.491, 0.536),   # Mike/Alpha junction
-    "a_f":        (0.445, 0.535),   # Alpha/Foxtrot
-    "f_cross":    (0.448, 0.500),   # Foxtrot crossing runway 25
-}
-
-
-def path(*names: str) -> list[list[float]]:
-    return [list(NODES[n]) for n in names]
-
 
 # ------------------------------------------------------------- pattern view
 
@@ -134,20 +107,6 @@ PATTERN_PATHS = {
 CONFIGS = {
     "25": {
         "runway": "25",
-        "wind_dir": (230, 270),
-        "taxi_out": {
-            "display": "Runway 25, taxi via Charlie, Hotel, cross Runway 15 Right and Runway 15 Left.",
-            "path": path("fbo", "ramp_out", "c_h", "h_15r", "h_mid", "h_15l",
-                         "h_north", "h_top", "hs25"),
-            "readback_items": [
-                ("runway", "Runway 25", [r"\brunway 25\b", r"\b25\b"]),
-                ("route", "via Charlie, Hotel", [r"\bcharlie\b.*\bhotel\b"]),
-                ("cross_15r", "cross Runway 15R", [r"cross.*15 ?(right|r\b)"]),
-                ("cross_15l", "cross Runway 15L", [r"cross.*15 ?(left|l\b)"]),
-            ],
-        },
-        "line_up": path("hs25", "rwy25_thr"),
-        "takeoff_roll": path("rwy25_thr", "rwy25_exit"),
         "departure_instruction": "left turn on course approved",
         "arrival_instruction": {
             "display": "Make straight-in Runway 25, report three mile final.",
@@ -157,40 +116,11 @@ CONFIGS = {
             ],
             "report_fix": "three mile final",
             "report_patterns": [r"\b3 mile\b", r"three mile", r"\bfinal\b"],
-        },
-        "landing_roll": path("rwy25_td", "rwy25_exit"),
-        "exit_instruction": {
-            "display": "Turn right at Charlie, contact Ground point seven.",
-            "spoken_exit": "turn right at charlie",
-            "path": path("rwy25_exit", "hs1"),
-            "readback_items": [
-                ("exit", "right at Charlie", [r"\bcharlie\b"]),
-                ("ground", "Ground on 121.7", [r"121\.7", r"point (7|seven)", r"\bground\b"]),
-            ],
-            "clear_of": "clear of Runway 25 at Charlie",
-        },
-        "taxi_in": {
-            "display": "Taxi to parking via Charlie.",
-            "path": path("hs1", "fbo"),
-            "readback_items": [
-                ("route", "via Charlie", [r"\bcharlie\b", r"\bparking\b"]),
-            ],
+            "report_readback_patterns": [r"\b3 mile\b", r"three mile"],
         },
     },
     "15L": {
         "runway": "15L",
-        "wind_dir": (120, 170),
-        "taxi_out": {
-            "display": "Runway 15 Left, taxi via Charlie, cross Runway 15 Right.",
-            "path": path("fbo", "ramp_out", "c_h", "c_15r", "hs15l"),
-            "readback_items": [
-                ("runway", "Runway 15L", [r"15 ?(left|l\b)"]),
-                ("route", "via Charlie", [r"\bcharlie\b"]),
-                ("cross_15r", "cross Runway 15R", [r"cross.*15 ?(right|r\b)"]),
-            ],
-        },
-        "line_up": path("hs15l", "rwy15l_thr"),
-        "takeoff_roll": path("rwy15l_thr", "rwy15l_exit"),
         "departure_instruction": "left turn eastbound approved",
         "arrival_instruction": {
             "display": "Enter right base Runway 15 Left, report two mile right base.",
@@ -200,25 +130,7 @@ CONFIGS = {
             ],
             "report_fix": "two mile right base",
             "report_patterns": [r"\b2 mile\b", r"two mile", r"right base"],
-        },
-        "landing_roll": path("rwy15l_td", "rwy15l_exit"),
-        "exit_instruction": {
-            "display": "Turn right at Mike, contact Ground point seven.",
-            "spoken_exit": "turn right at mike",
-            "path": path("rwy15l_exit", "m_clear"),
-            "readback_items": [
-                ("exit", "right at Mike", [r"\bmike\b"]),
-                ("ground", "Ground on 121.7", [r"121\.7", r"point (7|seven)", r"\bground\b"]),
-            ],
-            "clear_of": "clear of Runway 15 Left at Mike",
-        },
-        "taxi_in": {
-            "display": "Taxi to parking via Mike, Alpha, Foxtrot, cross Runway 25 at Foxtrot.",
-            "path": path("m_clear", "m_a", "a_f", "f_cross", "hs1", "fbo"),
-            "readback_items": [
-                ("route", "via Mike, Alpha, Foxtrot", [r"\bmike\b.*\bfoxtrot\b", r"\balpha\b.*\bfoxtrot\b"]),
-                ("cross_25", "cross Runway 25", [r"cross.*25"]),
-            ],
+            "report_readback_patterns": [r"\b2 mile\b", r"two mile"],
         },
     },
 }

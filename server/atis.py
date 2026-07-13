@@ -9,6 +9,16 @@ from .phraseology import NATO, say_altitude, say_digits, say_letter, say_runway
 
 ATIS_LETTERS = [letter for letter in NATO.values()]
 
+# A bounded KSBA training-weather distribution. It is sampled before runway
+# selection and keeps the current two-runway simulation within a scenario that
+# at least one modeled runway can normally serve. Westerly winds are weighted
+# more heavily to represent the common Runway 25 case.
+TRAINING_WIND_DIRECTIONS = tuple(range(120, 281, 10))
+TRAINING_WIND_WEIGHTS = tuple(
+    4 if direction >= 220 else 2 if direction <= 170 else 1
+    for direction in TRAINING_WIND_DIRECTIONS
+)
+
 
 @dataclass
 class Weather:
@@ -24,7 +34,7 @@ class Weather:
     altimeter: str       # "29.92"
 
 
-def make_weather(rng: random.Random, wind_range: tuple[int, int]) -> Weather:
+def make_weather(rng: random.Random) -> Weather:
     skies = [
         ("clear", "sky clear"),
         ("few clouds at 2,000", "few clouds at two thousand"),
@@ -35,7 +45,7 @@ def make_weather(rng: random.Random, wind_range: tuple[int, int]) -> Weather:
     return Weather(
         letter=rng.choice(ATIS_LETTERS),
         time_z=f"{rng.randint(16, 23):02d}53",
-        wind_dir=rng.randrange(wind_range[0], wind_range[1] + 1, 10),
+        wind_dir=rng.choices(TRAINING_WIND_DIRECTIONS, TRAINING_WIND_WEIGHTS, k=1)[0],
         wind_speed=rng.randint(6, 14),
         visibility=10,
         sky=sky,

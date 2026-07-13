@@ -1,4 +1,7 @@
-# Plan: Widescreen airport map, vector rendering, and chart-info drawer
+# Implemented Design: Widescreen Airport Map and Chart-Info Drawer
+
+> Status: implemented. This document is retained as the architectural record
+> for the chart conversion, coordinate migration, SVG renderer, and drawer.
 
 ## Problem
 

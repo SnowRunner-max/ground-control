@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+import httpx
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -22,14 +22,28 @@ sockets: set[WebSocket] = set()
 
 
 async def _speak(reply: AtcReply) -> dict:
-    """Serialize an ATC reply with synthesized audio."""
-    audio = await asyncio.to_thread(tts.synthesize, reply.spoken, reply.facility)
-    return {
+    """Serialize an ATC reply; preserve its text if TTS is unavailable."""
+    out = {
         "facility": reply.facility,
         "display": reply.display,
         "delay_ms": reply.delay_ms,
-        "audio_b64": base64.b64encode(audio).decode(),
+        "audio_b64": None,
+        "audio_unavailable": False,
     }
+    try:
+        audio = await asyncio.to_thread(tts.synthesize, reply.spoken, reply.facility)
+        out["audio_b64"] = base64.b64encode(audio).decode()
+    except Exception:
+        out["audio_unavailable"] = True
+    return out
+
+
+async def _service_up(url: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            return (await client.get(url)).status_code < 500
+    except Exception:
+        return False
 
 
 async def _broadcast(payload: dict) -> None:
@@ -49,6 +63,8 @@ async def _scheduled_push(m: Mission, push: dict) -> None:
     if mission is not m or m.complete:
         return
     reply = m.apply_push(push)
+    if reply is None:
+        return
     payload = {"type": "push", "atc": await _speak(reply),
                "coach": m.step().coach if m.coach_mode else ""}
     await _broadcast(payload)
@@ -59,16 +75,46 @@ async def health() -> dict:
     return {"ok": True, "mission": mission is not None}
 
 
+@app.get("/api/readiness")
+async def readiness() -> dict:
+    llama_up, whisper_up = await asyncio.gather(
+        _service_up(f"{llm.LLAMA_URL}/health"),
+        _service_up(f"{stt.WHISPER_URL}/"),
+    )
+    tts_ready = all((ROOT / "models" / name).is_file() for name in (
+        "kokoro-v1.0.onnx", "voices-v1.0.bin"))
+    services = {"llm": llama_up, "stt": whisper_up, "tts": tts_ready}
+    return {
+        "ready": all(services.values()),
+        "services": services,
+        "degraded": [name for name, available in services.items() if not available],
+    }
+
+
 @app.post("/api/mission/new")
 async def new_mission(payload: dict) -> dict:
     global mission
-    mission = Mission(
-        callsign=(payload.get("callsign") or "N67525").strip() or "N67525",
-        coach=bool(payload.get("coach", True)),
-    )
-    # Pre-warm the ATIS recording so tuning 132.65 is instant.
-    display, spoken = mission.atis_text()
-    asyncio.get_running_loop().run_in_executor(None, tts.synthesize, spoken, "atis")
+    wind_dir = payload.get("wind_dir")
+    wind_speed = payload.get("wind_speed")
+    if (wind_dir is None) != (wind_speed is None):
+        raise HTTPException(
+            status_code=400,
+            detail="wind_dir and wind_speed must be supplied together",
+        )
+    try:
+        wind = None if wind_dir is None else (int(wind_dir), int(wind_speed))
+        seed = None if payload.get("seed") is None else int(payload["seed"])
+        runway_override = payload.get("runway") or None
+        mission = Mission(
+            callsign=(payload.get("callsign") or "N67525").strip() or "N67525",
+            coach=bool(payload.get("coach", True)),
+            seed=seed,
+            wind=wind,
+            runway=runway_override,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    display, _ = mission.atis_text()
     brief = mission.brief()
     brief["atis_display"] = display
     return brief
@@ -88,7 +134,9 @@ async def debug_step() -> JSONResponse:
         "squawk": mission.squawk,
         "atis_letter": mission.wx.letter,
         "runway": mission.runway,
+        "runway_selection": mission.runway_selection.as_dict(),
         "luaw": mission.luaw,
+        "awaiting_takeoff_clearance": mission.awaiting_takeoff_clearance,
         "complete": mission.complete,
     })
 
@@ -98,7 +146,14 @@ async def atis_wav() -> Response:
     if mission is None:
         return Response(status_code=404)
     _, spoken = mission.atis_text()
-    audio = await asyncio.to_thread(tts.synthesize, spoken, "atis")
+    try:
+        audio = await asyncio.to_thread(tts.synthesize, spoken, "atis")
+    except Exception:
+        return JSONResponse(
+            {"error": "ATIS audio is unavailable; use the displayed ATIS text.",
+             "code": "tts_unavailable"},
+            status_code=503,
+        )
     return Response(content=audio, media_type="audio/wav")
 
 
@@ -115,7 +170,14 @@ async def transmit(
 
     transcript = text.strip()
     if not transcript and audio is not None:
-        transcript = await stt.transcribe(await audio.read())
+        try:
+            transcript = await stt.transcribe(await audio.read())
+        except Exception:
+            return JSONResponse(
+                {"error": "Speech recognition is unavailable; use the text box.",
+                 "code": "stt_unavailable"},
+                status_code=503,
+            )
     if not transcript:
         return JSONResponse({"transcript": "", "heard": False,
                              "coach": "I didn't catch any speech — hold the PTT while you talk."})
@@ -172,9 +234,12 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 if push.get("complete"):
                     narrative = await llm.debrief_narrative(
                         push["debrief"]["steps"], push["debrief"]["total"])
-                    if narrative:
-                        await ws.send_json({"type": "debrief_narrative",
-                                            "text": narrative})
+                    await ws.send_json({
+                        "type": "debrief_narrative",
+                        "text": narrative or (
+                            "Instructor narrative is unavailable. Review the "
+                            "exchange scores below for your debrief."),
+                    })
     except WebSocketDisconnect:
         pass
     finally:

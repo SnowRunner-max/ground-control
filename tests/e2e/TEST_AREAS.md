@@ -2,7 +2,8 @@
 
 E2E tests exercise the *live* stack — real llama-server (Qwen3-4B), real
 whisper-server (small.en), real Kokoro TTS — unlike `tests/test_*.py` which
-stub all models. They auto-skip when the stack isn't running.
+stub all models. They auto-skip when the stack isn't running unless
+`GROUND_CONTROL_REQUIRE_E2E=1` is set.
 
 **Infrastructure contract** (`tests/e2e/conftest.py`, shared):
 - llama-server on `$LLAMA_URL` (default :8080) and whisper-server on
@@ -24,7 +25,7 @@ whisper's transcription to still pass the deterministic grader.
 1. Spoken clearance call transcribes and passes (callsign, ATIS letter, request).
 2. Digit-critical readback survives STT: squawk code, "at or below 2,500",
    departure frequency 125.4 — spoken as phonetic words ("four five seven one").
-3. Taxi readback with route letters (Charlie/Hotel) and runway crossings passes.
+3. Taxi readback with current route identifiers (C/F/B/B1 or C/E) passes.
 4. Robustness: at least one alternate TTS voice/speed still grades correctly.
 5. ATIS endpoint returns a real WAV: parseable header, mono 16-bit, plausible
    duration (>15 s), and the spoken info letter matches the mission's.
@@ -62,4 +63,5 @@ exactly as the browser would.
 ./run.sh                      # or start llama-server + whisper-server manually
 uv run pytest tests/e2e -q    # e2e only
 uv run pytest -q              # unit suite still passes standalone (e2e skips if stack down)
+./scripts/test_live.sh         # start services and require all e2e tests to run
 ```

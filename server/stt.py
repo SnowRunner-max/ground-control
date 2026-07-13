@@ -12,10 +12,13 @@ WHISPER_URL = os.environ.get("WHISPER_URL", "http://127.0.0.1:8081")
 PROMPT = (
     "Santa Barbara Ground, Cessna six seven five two five, Above All Aviation, "
     "information Bravo, request VFR departure, taxi runway two five via Charlie "
-    "Hotel, cross runway one five right, holding short, cleared for takeoff, "
+    "Foxtrot Bravo Bravo one, runway one five left via Charlie Echo, holding short, "
+    "cleared for takeoff, "
     "squawk four five seven one, departure frequency one two five point four, "
     "line up and wait, cleared to land, full stop, niner, three mile final, "
-    "turn right at Mike, taxi to parking via Mike, Alpha, Foxtrot."
+    "turn right at Charlie, turn left at Echo three, taxi to Above All via Charlie, "
+    "cross runway one five right and one five left, Echo three Echo, cross runway "
+    "two five, Bravo Foxtrot Charlie."
 )
 
 

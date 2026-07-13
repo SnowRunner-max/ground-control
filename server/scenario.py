@@ -7,9 +7,10 @@ A mission is a fixed sequence of radio exchanges (Steps), each with:
 - world actions (plane movement) triggered by a passing call
 - an ideal example call shown by the coach
 
-All randomized values (runway config, weather, squawk, LUAW-or-not) are
-resolved at mission start, so grading is fully deterministic. The LLM never
-drives the scenario — it only polishes coach feedback and the debrief.
+Weather is resolved before the departure runway is selected; the remaining
+randomized values (squawk and LUAW-or-not) are then fixed at mission start, so
+grading is fully deterministic. The LLM never drives the scenario — it only
+polishes coach feedback and the debrief.
 """
 
 from __future__ import annotations
@@ -17,15 +18,16 @@ from __future__ import annotations
 import random
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
-from . import airport
+from . import airport, ground
 from .atis import Weather, atis_display, atis_spoken, make_weather
 from .phraseology import (
     normalize, say_altitude, say_callsign, say_digits, say_freq,
     say_letter, say_runway, say_wind, tail_regex,
 )
+from .runway_selection import RunwaySelection, select_runway
 
 
 @dataclass
@@ -67,17 +69,29 @@ _mhz = airport.mhz
 
 class Mission:
     def __init__(self, callsign: str = "N67525", coach: bool = True,
-                 seed: int | None = None):
+                 seed: int | None = None, weather: Weather | None = None,
+                 wind: tuple[int, int] | None = None,
+                 runway: str | None = None):
         self.rng = random.Random(seed)
         self.callsign = callsign.upper()
         self.tail = self.callsign.lstrip("N")
         self.tail_short = self.tail[-3:]
         self.coach_mode = coach
 
-        self.config_id = self.rng.choice(["25", "25", "15L"])  # 25 favored, as IRL
+        self.wx = weather or make_weather(self.rng)
+        if wind is not None:
+            self.wx = replace(self.wx, wind_dir=int(wind[0]), wind_speed=int(wind[1]))
+        self.runway_selection: RunwaySelection = select_runway(
+            self.wx.wind_dir,
+            self.wx.wind_speed,
+            override=runway,
+        )
+        self.runway = self.runway_selection.selected_runway
+        self.config_id = self.runway  # retained for pattern/config compatibility
         self.cfg = airport.CONFIGS[self.config_id]
-        self.runway = self.cfg["runway"]
-        self.wx: Weather = make_weather(self.rng, self.cfg["wind_dir"])
+        self.taxi_out_route = ground.CANONICAL_TAXI_ROUTES[("taxi_out", self.runway)]
+        self.taxi_in_route = ground.CANONICAL_TAXI_ROUTES[("taxi_in", self.runway)]
+        self.runway_operation = ground.RUNWAY_OPERATIONS[self.runway]
         self.squawk = self._make_squawk()
         self.luaw = self.rng.random() < 0.5
 
@@ -90,6 +104,8 @@ class Mission:
         self.complete = False
         self.started = time.time()
         self.xpdr_noted = False
+        self.awaiting_takeoff_clearance = False
+        self.pending_legs: dict[str, str] = {}
 
     # ------------------------------------------------------------ helpers
 
@@ -109,6 +125,15 @@ class Mission:
         return Item("callsign", "your callsign",
                     [tail_regex(self.tail), tail_regex(self.tail_short)])
 
+    @staticmethod
+    def _route_items(
+        requirements: tuple[ground.ReadbackRequirement, ...],
+    ) -> list[Item]:
+        return [
+            Item(requirement.key, requirement.label, list(requirement.patterns))
+            for requirement in requirements
+        ]
+
     def atis_text(self) -> tuple[str, str]:
         return atis_display(self.wx, self.runway), atis_spoken(self.wx, self.runway)
 
@@ -116,6 +141,9 @@ class Mission:
 
     def _build_steps(self) -> dict[str, Step]:
         cfg, wx, rwy = self.cfg, self.wx, self.runway
+        taxi_out = self.taxi_out_route
+        taxi_in = self.taxi_in_route
+        runway_op = self.runway_operation
         rwy_spoken = say_runway(rwy)
         rwy_pat = r"15 ?(left|l\b)" if rwy == "15L" else r"\b25\b"
         letter = wx.letter
@@ -137,7 +165,8 @@ class Mission:
             items=[
                 self._item_callsign(),
                 Item("atis", f"ATIS information {letter.title()}", [rf"\b{letter}\b"]),
-                Item("request", "your request (VFR departure)", [r"vfr", r"departure"]),
+                Item("request", "your request (VFR departure)",
+                     [r"\bvfr\b.*\bdeparture\b", r"\bdeparture\b.*\bvfr\b"]),
                 Item("direction", "direction of flight (east)", [r"\beast\b", r"coastal"], required=False),
                 Item("altitude", "requested altitude 3,500", [r"3500"], required=False),
             ],
@@ -161,7 +190,7 @@ class Mission:
                      f"squawk {self.squawk}, Cessna {self.tail_short}."),
             items=[
                 Item("altitude", "at or below 2,500", [r"2500"]),
-                Item("at_or_below", "the words 'at or below'", [r"at or below"], required=False),
+                Item("at_or_below", "the words 'at or below'", [r"at or below"]),
                 Item("dep_freq", f"departure frequency {dep_freq}", [dep_freq.replace(".", r"\.")]),
                 Item("squawk", f"squawk {self.squawk}", [rf"\b{self.squawk}\b"]),
                 self._item_callsign(),
@@ -181,14 +210,13 @@ class Mission:
             items=[
                 self._item_callsign(),
                 Item("position", "your position (Above All Aviation)", [r"above all", r"aviation"]),
-                Item("intent", "ready to taxi", [r"taxi", r"ready"]),
+                Item("intent", "ready to taxi", [r"ready.*taxi", r"taxi.*ready"]),
                 Item("atis", f"information {letter.title()}", [rf"\b{letter}\b"], required=False),
             ],
             atc=AtcReply(
                 "ground",
-                f"{self._cs_disp()}, Santa Barbara Ground, {cfg['taxi_out']['display']}",
-                (f"{self._cs()}, santa barbara ground, runway {rwy_spoken}, "
-                 f"{self._spoken_taxi_out()}"),
+                f"{self._cs_disp()}, Santa Barbara Ground, {taxi_out.display_instruction}",
+                f"{self._cs()}, santa barbara ground, {taxi_out.spoken_instruction}",
             ),
             next_id="ground_readback",
         ))
@@ -196,13 +224,12 @@ class Mission:
         add(Step(
             id="ground_readback", facility="ground",
             coach="Read back the full taxi instruction — runway, route, and every crossing.",
-            example=f"{cfg['taxi_out']['display'].rstrip('.')}, Cessna {self.tail_short}.",
-            items=[Item(k, lbl, pats) for k, lbl, pats in cfg["taxi_out"]["readback_items"]]
-                  + [self._item_callsign()],
+            example=f"{taxi_out.display_instruction.rstrip('.')}, Cessna {self.tail_short}.",
+            items=self._route_items(taxi_out.readback_requirements) + [self._item_callsign()],
             atc=AtcReply("ground",
                          f"{self._cs_disp()}, readback correct.",
                          f"{self._cs()}, readback correct."),
-            actions=[{"type": "move", "view": "ground", "path": cfg["taxi_out"]["path"],
+            actions=[{"type": "move", "view": "ground", "path": taxi_out.path,
                       "leg": "taxi_out", "speed": "taxi"}],
             next_id="tower_checkin",
         ))
@@ -222,9 +249,9 @@ class Mission:
             example=f"Santa Barbara Tower, Cessna {self.tail}, holding short Runway {rwy}, ready for departure.",
             items=[
                 self._item_callsign(),
-                Item("position", "holding short / ready for departure",
-                     [r"holding short", r"ready for (departure|takeoff)", r"\bready\b"]),
-                Item("runway", f"Runway {rwy}", [rwy_pat], required=False),
+                Item("position", "holding short", [r"holding short"]),
+                Item("ready", "ready for departure", [r"\bready\b"]),
+                Item("runway", f"Runway {rwy}", [rwy_pat]),
             ],
             check_xpdr=True,
             atc=(AtcReply("tower",
@@ -241,13 +268,13 @@ class Mission:
                 example=f"Runway {rwy}, line up and wait, Cessna {self.tail_short}.",
                 items=[
                     Item("luaw", "line up and wait", [r"line up and wait"]),
-                    Item("runway", f"Runway {rwy}", [rwy_pat], required=False),
+                    Item("runway", f"Runway {rwy}", [rwy_pat]),
                     self._item_callsign(),
                 ],
-                actions=[{"type": "move", "view": "ground", "path": cfg["line_up"],
+                actions=[{"type": "move", "view": "ground", "path": runway_op.line_up_path,
                           "leg": "line_up", "speed": "taxi"}],
                 push_after={"delay_s": 8.0, "atc": takeoff_reply,
-                            "advance_to": "takeoff_readback"},
+                            "kind": "takeoff_clearance"},
                 next_id="takeoff_readback",
             ))
 
@@ -257,12 +284,17 @@ class Mission:
             example=f"Cleared for takeoff Runway {rwy}, {cfg['departure_instruction'].split(' approved')[0]}, Cessna {self.tail_short}.",
             items=[
                 Item("clearance", "cleared for takeoff", [r"cleared for takeoff"]),
-                Item("runway", f"Runway {rwy}", [rwy_pat], required=False),
+                Item("runway", f"Runway {rwy}", [rwy_pat]),
+                Item("departure", cfg["departure_instruction"],
+                     ([r"left turn.*on course", r"left.*course"]
+                      if self.config_id == "25"
+                      else [r"left turn.*east", r"left.*east"])),
                 self._item_callsign(),
             ],
             actions=[
                 {"type": "move", "view": "ground",
-                 "path": (cfg["line_up"] if not self.luaw else []) + cfg["takeoff_roll"],
+                 "path": ((runway_op.line_up_path[:-1] + runway_op.takeoff_roll_path)
+                          if not self.luaw else runway_op.takeoff_roll_path),
                  "leg": None, "speed": "roll"},
                 {"type": "move", "view": "pattern",
                  "path": airport.PATTERN_PATHS[self.config_id]["climb_out"],
@@ -289,7 +321,8 @@ class Mission:
             example=f"Santa Barbara Departure, Cessna {self.tail}, one thousand two hundred climbing 3,500.",
             items=[
                 self._item_callsign(),
-                Item("altitude", "altitude climbing to 3,500", [r"3500", r"climbing"]),
+                Item("altitude", "altitude climbing to 3,500",
+                     [r"climbing.*3500", r"3500.*climbing"]),
             ],
             atc=AtcReply(
                 "approach",
@@ -307,9 +340,13 @@ class Mission:
             id="dep_ack", facility="approach",
             coach="Acknowledge with a short readback: own navigation, altitude restriction, callsign.",
             example=f"Own navigation, at or below 2,500 until leaving the Charlie, Cessna {self.tail_short}.",
-            items=[self._item_callsign(),
-                   Item("ack", "own navigation / the restriction",
-                        [r"own navigation", r"2500", r"roger", r"wilco"], required=False)],
+            items=[
+                self._item_callsign(),
+                Item("navigation", "own navigation", [r"own navigation"]),
+                Item("altitude", "at or below 2,500", [r"at or below.*2500"]),
+                Item("boundary", "until leaving the Class Charlie",
+                     [r"until leaving.*charlie", r"leaving.*class (charlie|c)"]),
+            ],
             actions=[{"type": "move", "view": "pattern",
                       "path": airport.PATTERN_PATHS[self.config_id]["cruise_east"],
                       "leg": "cruise_east", "speed": "fly"}],
@@ -359,7 +396,8 @@ class Mission:
             example=f"Santa Barbara Tower, Cessna {self.tail}, eight miles east at 2,500, full stop.",
             items=[
                 self._item_callsign(),
-                Item("position", "position (8 miles east)", [r"\beast\b", r"8 mile"]),
+                Item("position", "position (8 miles east)",
+                     [r"8 mile.*east", r"east.*8 mile"]),
                 Item("intent", "full stop", [r"full stop", r"landing", r"land\b", r"inbound"]),
             ],
             atc=AtcReply(
@@ -375,7 +413,8 @@ class Mission:
             coach="Read back the pattern entry, runway, and the report point.",
             example=f"{arr['display'].rstrip('.')}, Cessna {self.tail_short}.",
             items=[Item(k, lbl, pats) for k, lbl, pats in arr["readback_items"]]
-                  + [self._item_callsign()],
+                  + [Item("report", arr["report_fix"], arr["report_readback_patterns"]),
+                     self._item_callsign()],
             actions=[{"type": "move", "view": "pattern",
                       "path": airport.PATTERN_PATHS[self.config_id]["to_final"],
                       "leg": "to_final", "speed": "fly"}],
@@ -404,27 +443,26 @@ class Mission:
             example=f"Cleared to land Runway {rwy}, Cessna {self.tail_short}.",
             items=[
                 Item("clearance", "cleared to land", [r"cleared to land"]),
-                Item("runway", f"Runway {rwy}", [rwy_pat], required=False),
+                Item("runway", f"Runway {rwy}", [rwy_pat]),
                 self._item_callsign(),
             ],
             actions=[
                 {"type": "move", "view": "pattern",
                  "path": airport.PATTERN_PATHS[self.config_id]["final"],
                  "leg": None, "speed": "fly"},
-                {"type": "move", "view": "ground", "path": cfg["landing_roll"],
+                {"type": "move", "view": "ground", "path": runway_op.landing_roll_path,
                  "leg": "landing_roll", "speed": "roll"},
             ],
             next_id="exit_readback",
         ))
 
-        ex = cfg["exit_instruction"]
         add(Step(
             id="exit_readback", facility="tower",
             coach="Read back the runway exit and the ground frequency.",
-            example=f"{ex['display'].rstrip('.')}, Cessna {self.tail_short}.",
-            items=[Item(k, lbl, pats) for k, lbl, pats in ex["readback_items"]]
+            example=f"{runway_op.exit_display.rstrip('.')}, Cessna {self.tail_short}.",
+            items=self._route_items(runway_op.exit_readback_requirements)
                   + [self._item_callsign()],
-            actions=[{"type": "move", "view": "ground", "path": ex["path"],
+            actions=[{"type": "move", "view": "ground", "path": runway_op.exit_path,
                       "leg": "exit", "speed": "taxi"}],
             next_id="ground_inbound",
         ))
@@ -432,7 +470,8 @@ class Mission:
         add(Step(
             id="ground_inbound", facility="ground",
             coach="Switch to Ground 121.7: callsign, clear of the runway and where, taxi to Above All Aviation.",
-            example=f"Santa Barbara Ground, Cessna {self.tail}, {ex['clear_of']}, taxi to Above All Aviation.",
+            example=(f"Santa Barbara Ground, Cessna {self.tail}, "
+                     f"{runway_op.clear_of_display}, taxi to Above All Aviation."),
             items=[
                 self._item_callsign(),
                 Item("position", "clear of the runway and where", [r"clear of"]),
@@ -441,41 +480,28 @@ class Mission:
             ],
             atc=AtcReply(
                 "ground",
-                f"{self._cs_disp()}, Santa Barbara Ground, {cfg['taxi_in']['display']}",
-                f"{self._cs()}, santa barbara ground, {self._spoken_taxi_in()}",
+                f"{self._cs_disp()}, Santa Barbara Ground, {taxi_in.display_instruction}",
+                f"{self._cs()}, santa barbara ground, {taxi_in.spoken_instruction}",
             ),
             next_id="taxi_in_readback",
         ))
 
         add(Step(
             id="taxi_in_readback", facility="ground",
-            coach="Read back the taxi-in route (and any crossing!), then taxi to parking.",
-            example=f"{cfg['taxi_in']['display'].rstrip('.')}, Cessna {self.tail_short}.",
-            items=[Item(k, lbl, pats) for k, lbl, pats in cfg["taxi_in"]["readback_items"]]
-                  + [self._item_callsign()],
-            actions=[{"type": "move", "view": "ground", "path": cfg["taxi_in"]["path"],
+            coach="Read back the taxi-in route (and any crossing!), then taxi to Above All.",
+            example=f"{taxi_in.display_instruction.rstrip('.')}, Cessna {self.tail_short}.",
+            items=self._route_items(taxi_in.readback_requirements) + [self._item_callsign()],
+            actions=[{"type": "move", "view": "ground", "path": taxi_in.path,
                       "leg": "taxi_in", "speed": "taxi"}],
             next_id=None,
         ))
 
         return steps
 
-    def _spoken_taxi_out(self) -> str:
-        if self.config_id == "25":
-            return ("taxi via charlie, hotel, cross runway one five right "
-                    "and runway one five left.")
-        return "taxi via charlie, cross runway one five right."
-
     def _spoken_arrival(self) -> str:
         if self.config_id == "25":
             return "make straight in runway two five, report three mile final."
         return "enter right base runway one five left, report two mile right base."
-
-    def _spoken_taxi_in(self) -> str:
-        if self.config_id == "25":
-            return "taxi to parking via charlie."
-        return ("taxi to parking via mike, alpha, foxtrot, "
-                "cross runway two five at foxtrot.")
 
     # ------------------------------------------------------------ gameplay
 
@@ -498,6 +524,19 @@ class Mission:
         if "say again" in norm and self.last_atc:
             return self._result(heard=True, atc=self.last_atc, repeat=True,
                                 coach="Repeated. " + step.coach)
+
+        # A line-up-and-wait readback does not authorize takeoff. Keep the
+        # next step visible, but do not grade it until Tower issues the delayed
+        # takeoff clearance.
+        if self.awaiting_takeoff_clearance and step.id == "takeoff_readback":
+            reply = AtcReply(
+                "tower",
+                f"{self._cs_disp()}, hold position. Await takeoff clearance.",
+                f"{self._cs()}, hold position. await takeoff clearance.",
+            )
+            return self._result(
+                heard=True, atc=reply, passed=None,
+                coach="Hold position and wait for Tower's takeoff clearance.")
 
         # transponder gate at the tower check-in
         if step.check_xpdr and xpdr_code and xpdr_code != self.squawk:
@@ -549,6 +588,8 @@ class Mission:
         atc = step.atc
         push = step.push_after
         actions = step.actions
+        if step.id == "luaw_readback":
+            self.awaiting_takeoff_clearance = True
         if step.next_id:
             self.current = step.next_id
         else:
@@ -560,6 +601,9 @@ class Mission:
             self.last_atc = atc
             self.log.append({"who": "atc", "freq": freq_khz, "text": atc.display,
                              "t": time.time() - self.started})
+        for action in actions:
+            if action.get("leg"):
+                self.pending_legs[action["leg"]] = self.current
         return self._result(heard=True, atc=atc, passed=True, score=score,
                             actions=actions, coach=coach, push=push)
 
@@ -597,7 +641,9 @@ class Mission:
 
     def leg_complete(self, leg: str) -> dict | None:
         """Client finished animating a movement leg. Returns an optional push."""
-        cfg = self.cfg
+        expected_state = self.pending_legs.pop(leg, None)
+        if expected_state is None or expected_state != self.current:
+            return None
         if leg == "taxi_out":
             return {"coach": self.steps["tower_checkin"].coach}
         if leg == "climb_out":
@@ -613,11 +659,11 @@ class Mission:
         if leg == "to_final":
             return {"coach": self.steps["position_report"].coach}
         if leg == "landing_roll":
-            ex = cfg["exit_instruction"]
             reply = AtcReply(
                 "tower",
-                f"{self._cs_disp()}, {ex['display']}",
-                f"{self._cs()}, {ex['spoken_exit']}, contact ground point seven.",
+                f"{self._cs_disp()}, {self.runway_operation.exit_display}",
+                (f"{self._cs()}, {self.runway_operation.exit_spoken}, "
+                 "contact ground point seven."),
             )
             self.last_atc = reply
             self.log.append({"who": "atc", "freq": airport.FREQS["tower"],
@@ -628,11 +674,14 @@ class Mission:
             return {"complete": True, "debrief": self.debrief()}
         return None
 
-    def apply_push(self, push: dict) -> AtcReply:
-        """Advance state for a scheduled push and log it."""
+    def apply_push(self, push: dict) -> AtcReply | None:
+        """Apply a scheduled push once; stale or duplicate pushes are ignored."""
+        if push.get("kind") == "takeoff_clearance":
+            if not self.awaiting_takeoff_clearance \
+                    or self.current != "takeoff_readback":
+                return None
+            self.awaiting_takeoff_clearance = False
         reply: AtcReply = push["atc"]
-        if push.get("advance_to"):
-            self.current = push["advance_to"]
         self.last_atc = reply
         self.log.append({"who": "atc", "freq": airport.FREQS[reply.facility],
                          "text": reply.display, "t": time.time() - self.started})
@@ -653,7 +702,10 @@ class Mission:
             ),
             "freqs": {k: _mhz(v) for k, v in airport.FREQS.items()},
             "chart_info": airport.CHART_INFO,
-            "plane": {"view": "ground", "pos": list(airport.NODES["fbo"])},
+            "runway": self.runway,
+            "runway_selection": self.runway_selection.as_dict(),
+            "plane": {"view": "ground", "pos": list(
+                ground.GROUND_NODES["above_all_parking"].position)},
             "pattern_points": {k: list(v) for k, v in airport.PATTERN_POINTS.items()},
             "coach_hint": self.steps["clearance_call"].coach,
         }

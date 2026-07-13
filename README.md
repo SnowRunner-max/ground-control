@@ -7,7 +7,7 @@ Delivery → Ground → Tower → Departure → return → Approach → Tower �
 Ground → parking. The plane only moves on the real FAA airport diagram when your
 readbacks are correct.
 
-Everything runs offline on your Mac:
+Everything runs locally and, after setup, offline on macOS or Linux:
 
 | Role | Engine | Model |
 |---|---|---|
@@ -15,9 +15,19 @@ Everything runs offline on your Mac:
 | Coach / debrief brain | llama.cpp (`llama-server`) | Qwen3-4B-Instruct Q4_K_M |
 | ATC voices | kokoro-onnx | kokoro-v1.0 (distinct voice per facility) |
 
+## Scope
+
+Ground Control is intentionally a **single-user, local application**. Run one
+mission in one browser tab; multiple simultaneous tabs or remote users are not
+supported. Text input remains available when a microphone or speech service is
+unavailable.
+
 ## Setup (one time)
 
-Requires Homebrew, `uv`, and `llama.cpp` (`brew install llama.cpp`).
+Requires Python 3.11–3.13 (3.12 is the reference version), `uv`, llama.cpp,
+and whisper.cpp. On macOS, install the native tools with Homebrew. The setup
+script also supports Arch Linux packages and explains the manual fallback on
+other Linux distributions.
 
 ```sh
 ./scripts/setup.sh   # installs whisper-cpp, python deps, downloads ~3.5 GB of models
@@ -85,12 +95,26 @@ Key files:
 - [x] Scaffold, model downloads, map render from the FAA diagram PDF
 - [x] Scenario FSM, grading, ATIS, LLM/STT/TTS wrappers, FastAPI server
 - [x] Web UI (map animation, radio stack, PTT audio, coach panel, debrief)
-- [x] pytest suite — 57 tests: full-mission walks (both runway configs, with
-      and without line-up-and-wait), failure paths (wrong frequency, bad
-      readbacks, transponder, say-again, scoring), phraseology round-trips,
-      and API/WebSocket surface with TTS/LLM stubbed (`uv run pytest`)
-- [ ] End-to-end verification with all three servers live (voice roundtrip,
-      full mission in the browser, latency check)
+- [x] Offline pytest suite — 87 tests: full-mission walks (both runway configs,
+      with and without line-up-and-wait), failure paths, phraseology
+      round-trips, chart geometry, and API/WebSocket behavior with model calls
+      stubbed
+- [x] Live-stack e2e suite — 10 tests covering voice roundtrips, a complete
+      mission over HTTP/WebSocket, generated audio, latency, and static assets
+- [x] Automated end-to-end verification with all three services live: 10/10
+      voice, mission, audio, WebSocket, static-asset, and latency tests passing
+      (Linux/AMD CPU reference run, 2026-07-11)
 
 A useful invariant the suite enforces: every step's coach-suggested ideal call
 must fully satisfy that step's own grader, across randomized missions.
+
+## Tests
+
+```sh
+uv run pytest tests --ignore=tests/e2e -q  # 87 offline tests; no model servers needed
+uv run pytest -q                          # e2e tests skip if the live stack is down
+./scripts/test_live.sh                    # require and run all 10 live e2e tests
+```
+
+The required-live command starts the local model services, fails instead of
+skipping when they cannot become ready, and shuts them down after the run.

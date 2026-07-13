@@ -105,8 +105,9 @@ const RadioAudio = {
 
   async loadAtis() {
     const r = await fetch("/api/atis.wav");
-    if (!r.ok) return;
+    if (!r.ok) return false;
     this.atisBuffer = await this.ctx.decodeAudioData(await r.arrayBuffer());
+    return true;
   },
 
   setAtis(on) {

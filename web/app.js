@@ -10,13 +10,29 @@ const App = {
   async start() {
     const callsign = document.getElementById("callsign-input").value.trim() || "N67525";
     const coach = document.getElementById("coach-check").checked;
+    const startBtn = document.getElementById("start-btn");
+    const startStatus = document.getElementById("start-status");
+    startBtn.disabled = true;
+    startStatus.textContent = "Checking local services…";
 
-    const r = await fetch("/api/mission/new", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callsign, coach }),
-    });
-    this.brief = await r.json();
+    try {
+      const readiness = await fetch("/api/readiness").then((r) => r.json());
+      this.showReadiness(readiness);
+
+      const r = await fetch("/api/mission/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callsign, coach }),
+      });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error || "Could not start the mission.");
+      this.brief = body;
+    } catch (e) {
+      startStatus.textContent = e.message || "Could not reach Ground Control.";
+      startStatus.classList.add("degraded");
+      startBtn.disabled = false;
+      return;
+    }
 
     for (const [fac, mhz] of Object.entries(this.brief.freqs)) {
       this.facilityKhz[fac] = Math.round(parseFloat(mhz) * 1000);
@@ -37,14 +53,39 @@ const App = {
     Radio.init();
     GameMap.init(document.getElementById("map"), this.brief);
     GameMap.setView("ground");
-    await RadioAudio.init();
-    RadioAudio.loadAtis();
-    Radio.onActiveChange = (khz) => RadioAudio.setAtis(khz === this.facilityKhz.atis);
+    let atisLoaded = false;
+    try {
+      await RadioAudio.init();
+      Radio.onActiveChange = (khz) => RadioAudio.setAtis(khz === this.facilityKhz.atis);
+      atisLoaded = await RadioAudio.loadAtis();
+    } catch {
+      atisLoaded = false;
+    }
+    if (atisLoaded) {
+      RadioAudio.setAtis(Radio.activeKhz === this.facilityKhz.atis);
+    } else {
+      const details = document.getElementById("atis-details");
+      details.style.display = "";
+      details.open = true;
+      this.setStatus("ATIS audio unavailable — use the displayed ATIS text.");
+    }
 
     this.connectWs();
     this.wirePtt();
     this.wireTextForm();
     this.wireChartInfo();
+  },
+
+  showReadiness(readiness) {
+    const unavailable = readiness.degraded || [];
+    const text = unavailable.length
+      ? `Degraded mode · unavailable: ${unavailable.join(", ")}`
+      : "Local voice services ready";
+    for (const id of ["start-status", "service-status"]) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.classList.toggle("degraded", unavailable.length > 0);
+    }
   },
 
   // ---- chart info drawer -----------------------------------------------------
@@ -69,7 +110,7 @@ const App = {
       html += `<div class="ci-runway">
         <div class="ci-runway-id">RWY ${rw.id}</div>
         <div class="ci-runway-detail">${rw.dimensions_ft} ft</div>
-        <div class="ci-runway-detail">PCN ${rw.pcn}</div>
+        <div class="ci-runway-detail">${rw.pavement_rating}</div>
         <div class="ci-runway-detail">${rw.strength}</div>
       </div>`;
     }
@@ -100,9 +141,14 @@ const App = {
   },
 
   connectWs() {
-    this.ws = new WebSocket(`ws://${location.host}/ws`);
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    this.ws = new WebSocket(`${scheme}://${location.host}/ws`);
+    this.ws.onopen = () => this.setStatus(" ");
     this.ws.onmessage = (e) => this.onPush(JSON.parse(e.data));
-    this.ws.onclose = () => setTimeout(() => this.connectWs(), 1500);
+    this.ws.onclose = () => {
+      this.setStatus("Connection lost — reconnecting…");
+      setTimeout(() => this.connectWs(), 1500);
+    };
   },
 
   sendLegComplete(leg) {
@@ -121,7 +167,11 @@ const App = {
     if (msg.atc) {
       const khz = this.facilityKhz[msg.atc.facility];
       if (Radio.activeKhz === khz) {
-        RadioAudio.playAtc(msg.atc.audio_b64, msg.atc.delay_ms);
+        if (msg.atc.audio_b64) {
+          RadioAudio.playAtc(msg.atc.audio_b64, msg.atc.delay_ms);
+        } else {
+          this.setStatus("ATC audio unavailable — transmission shown in the log.");
+        }
         this.addLog("atc", msg.atc.facility, msg.atc.display);
       } else {
         this.addLog("info", "", `You missed a call on ${(khz / 1000).toFixed(2)} — check your frequency.`);
@@ -197,9 +247,10 @@ const App = {
     try {
       const r = await fetch("/api/transmit", { method: "POST", body: fd });
       const res = await r.json();
+      if (!r.ok) throw new Error(res.error || "Transmission failed.");
       this.handleResult(res);
-    } catch {
-      this.setStatus("Server error — try again.");
+    } catch (e) {
+      this.setStatus(e.message || "Server error — try again.");
     } finally {
       this.busy = false;
     }
@@ -214,12 +265,21 @@ const App = {
       this.addLog("info", "", "…static…");
     }
     if (res.atc) {
-      RadioAudio.playAtc(res.atc.audio_b64, res.atc.delay_ms);
+      if (res.atc.audio_b64) {
+        RadioAudio.playAtc(res.atc.audio_b64, res.atc.delay_ms);
+      } else {
+        this.setStatus("ATC audio unavailable — transmission shown in the log.");
+      }
       this.addLog("atc", res.atc.facility, res.atc.display);
     }
     if (res.coach) this.setCoach(res.coach);
     if (res.actions && res.actions.length) {
-      GameMap.runActions(res.actions, (leg) => this.sendLegComplete(leg));
+      GameMap.runActions(res.actions, (leg) => this.sendLegComplete(leg))
+        .catch((error) => {
+          console.error("movement stopped", error);
+          this.setStatus(error.message || "Aircraft movement stopped.");
+          this.addLog("info", "", error.message || "Aircraft movement stopped.");
+        });
     }
   },
 
