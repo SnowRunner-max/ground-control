@@ -105,3 +105,18 @@ def test_above_all_node_is_on_north_ramp():
     x, y = GROUND_NODES["above_all_parking"].position
     assert 0.64 <= x <= 0.72
     assert 0.18 <= y <= 0.29
+
+
+def test_runup_nodes_land_in_the_four_charted_pavement_regions():
+    from server.ground import GROUND_NODES
+
+    regions = {
+        "runup_7_a": ((0.18, 0.26), (0.49, 0.56)),
+        "runup_15r_c": ((0.41, 0.49), (0.37, 0.44)),
+        "runup_15l_f": ((0.64, 0.73), (0.33, 0.39)),
+        "runup_25_g": ((0.87, 0.93), (0.33, 0.39)),
+    }
+    for node_id, ((xmin, xmax), (ymin, ymax)) in regions.items():
+        x, y = GROUND_NODES[node_id].position
+        assert xmin <= x <= xmax, node_id
+        assert ymin <= y <= ymax, node_id

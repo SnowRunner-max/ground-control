@@ -47,6 +47,10 @@ NATO = {
     "y": "yankee", "z": "zulu",
 }
 
+# Conservative hesitation vocabulary accepted only while matching a known
+# alphanumeric callsign. These remain ordinary words during normalization.
+CALLSIGN_FILLERS = ("ah", "er", "uh", "um")
+
 
 def normalize(text: str) -> str:
     """Canonicalize a transcript for pattern matching."""
@@ -127,18 +131,34 @@ def _merge_numbers(tokens: list[str]) -> str:
 
 def tail_regex(tail: str) -> str:
     """Regex over normalized() text for a tail number. '3083S' must match
-    both the spoken form '3083 sierra' and the typed form '3083s'."""
+    the spoken form '3083 sierra', punctuation-split digit groups such as
+    '308 3 sierra', a brief filler or whitespace-separated repeated digit,
+    and the typed form '3083s'. Digit-only tails remain strict so
+    clause-separated numbers cannot be mistaken for a callsign."""
     tail = tail.lower()
-    parts: list[str] = []
-    for ch in tail:
-        if ch.isdigit() and parts and parts[-1].isdigit():
-            parts[-1] += ch
+    if tail.isdigit():
+        return rf"\b{re.escape(tail)}\b"
+
+    tokens = [re.escape(ch if ch.isdigit() else NATO.get(ch, ch))
+              for ch in tail]
+    filler = "(?:" + "|".join(CALLSIGN_FILLERS) + ")"
+    spoken = tokens[0]
+    for current, following, following_token in zip(tail, tail[1:], tokens[1:]):
+        if current.isdigit():
+            # Only a separated duplicate is a hesitation. A contiguous extra
+            # digit remains a different callsign and must not match.
+            spoken += rf"(?:\s+{re.escape(current)})?"
+
+        if current.isdigit() and following.isdigit():
+            # Normalization may leave digits adjacent or separate them at an
+            # STT punctuation boundary.
+            spoken += rf"(?:\s+{filler}\s+|\s*)"
         else:
-            parts.append(ch if ch.isdigit() else NATO.get(ch, ch))
-    spoken = " ".join(parts)
-    if spoken == tail:
-        return rf"\b{tail}\b"
-    return rf"\b(?:{spoken}|{tail})\b"
+            # NATO words need a real token boundary; a filler may occupy it.
+            spoken += rf"(?:\s+{filler}\s+|\s+)"
+        spoken += following_token
+
+    return rf"\b(?:{spoken}|{re.escape(tail)})\b"
 
 
 # ---------------------------------------------------------------- TTS side

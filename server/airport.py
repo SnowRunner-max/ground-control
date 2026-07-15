@@ -12,7 +12,13 @@ below follow the drawn pavement. These coordinates were produced by applying
 chart_geometry.portrait_to_chart to the original portrait-referenced values.
 """
 
-from .chart_geometry import CHART_CYCLE, CHART_EFFECTIVE, CHART_SOURCE_URL
+from .chart_geometry import (
+    CHART_CYCLE,
+    CHART_EFFECTIVE,
+    CHART_SOURCE_URL,
+    CITY_ALP_APPROVED,
+    CITY_ALP_SOURCE_URL,
+)
 
 FIELD = {
     "id": "KSBA",
@@ -73,6 +79,8 @@ CHART_INFO = {
         "Magnetic variation 14° E (annual rate of change 0.0° W, Jan 1985).",
         f"FAA airport diagram AL-378, cycle {CHART_CYCLE}, effective {CHART_EFFECTIVE}.",
         f"Source: {CHART_SOURCE_URL}",
+        f"Ground geometry cross-check: City airport layout plan approved "
+        f"{CITY_ALP_APPROVED}. Source: {CITY_ALP_SOURCE_URL}",
     ],
 }
 

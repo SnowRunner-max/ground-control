@@ -23,6 +23,17 @@ CHART_SOURCE_FILE = "FAA_KSBA_APD_2607.pdf"
 CHART_SOURCE_URL = "https://aeronav.faa.gov/d-tpp/2607/00378AD.PDF"
 CHART_SOURCE_SHA256 = "e146968bbd25f886b3e16ecae8816590cf2f1224c39173fb122d4e3639aa9de2"
 
+# Detailed pavement/topology reference. This 36x24-inch City airport layout
+# plan was approved 29 October 2024 and published in February 2025. It retains
+# planning annotations, so the current FAA chart above remains authoritative
+# for operational taxiway names.
+CITY_ALP_SOURCE_URL = (
+    "https://flysba.santabarbaraca.gov/sites/default/files/2025-02/"
+    "Airport%20Layout%20Plan_1.pdf"
+)
+CITY_ALP_APPROVED = "29 OCT 2024"
+CITY_ALP_SHA256 = "b8cf66d42cc5250dbc740e50618aa244175a7fbba47bb33305fb783e7b53e749"
+
 # Portrait page size of the source PDF, in PDF points.
 PAGE_W = 387.36
 PAGE_H = 594.0

@@ -52,10 +52,12 @@ other Linux distributions.
    Release to transmit. There's also a text box if you'd rather type a call.
 5. **Transponder** — Clearance Delivery assigns a squawk. Dial it in and set
    the mode to ALT before takeoff; Tower will catch a wrong code.
-6. **Readbacks move the plane.** A correct taxi readback starts the taxi
-   animation; hold-short and runway-crossing readbacks are enforced (per the
-   caution note on the SBA diagram). Bad calls get a realistic "say again" or
-   correction — and in coach mode, a CFI-style tip plus the ideal phraseology.
+6. **Readbacks move the plane.** Ground first taxis you to the run-up area for
+   the assigned runway. After the run-up, report "run-up complete" on Ground,
+   read back the route to the hold-short line, then contact Tower. Hold-short
+   and actual runway-crossing readbacks are enforced (per the caution note on
+   the SBA diagram). Bad calls get a realistic "say again" or correction — and
+   in coach mode, a CFI-style tip plus the ideal phraseology.
 7. Say **"say again"** any time to have ATC repeat the last transmission.
 8. Park back at Above All for your **debrief**: per-exchange scores and a
    short instructor writeup.
@@ -84,8 +86,10 @@ phraseology spoken by Kokoro, with per-facility voices.
 Key files:
 
 - `server/scenario.py` — the mission: every exchange, graded items, ATC replies
-- `server/airport.py` — KSBA frequencies, taxi node graph (normalized diagram
-  coordinates), runway configs 25 / 15L, pattern-view geometry
+- `server/ground.py` — KSBA taxi/run-up graph, routes, and runway movement
+  geometry in normalized diagram coordinates
+- `server/airport.py` — KSBA frequencies, chart information, runway configs
+  25 / 15L, and pattern-view geometry
 - `server/phraseology.py` — spoken-number normalization both directions
 - `server/atis.py` — randomized ATIS generation
 - `scripts/setup.sh`, `run.sh` — install + launch
@@ -95,7 +99,7 @@ Key files:
 - [x] Scaffold, model downloads, map render from the FAA diagram PDF
 - [x] Scenario FSM, grading, ATIS, LLM/STT/TTS wrappers, FastAPI server
 - [x] Web UI (map animation, radio stack, PTT audio, coach panel, debrief)
-- [x] Offline pytest suite — 87 tests: full-mission walks (both runway configs,
+- [x] Offline pytest suite — 147 tests: full-mission walks (both runway configs,
       with and without line-up-and-wait), failure paths, phraseology
       round-trips, chart geometry, and API/WebSocket behavior with model calls
       stubbed

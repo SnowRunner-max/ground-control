@@ -102,31 +102,82 @@ class TestBadReadbacks:
         r = m.handle_transmission(airport.FREQS["clearance"], "Cessna 525, hi")
         assert m.steps["clearance_call"].example.split(",")[0] in r["coach"]
 
+    def test_partial_call_with_missing_callsign_asks_for_callsign(self):
+        m = make_mission(config="25")
+        r = m.handle_transmission(
+            airport.FREQS["clearance"],
+            f"Information {m.wx.letter}, request VFR departure",
+        )
+        assert r["passed"] is False
+        assert r["missing"] == ["your callsign"]
+        assert "say callsign again" in r["atc"].display.lower()
+        assert "read back" not in r["atc"].display.lower()
+        assert m.callsign not in r["atc"].display
+
+    def test_incorrect_callsign_asks_for_callsign(self):
+        m = Mission(callsign="N3068S", seed=find_seed(config="25"))
+        r = m.handle_transmission(
+            airport.FREQS["clearance"],
+            (f"Cessna three zero six seven Sierra, information {m.wx.letter}, "
+             "request VFR departure"),
+        )
+        assert r["passed"] is False
+        assert r["missing"] == ["your callsign"]
+        assert "say callsign again" in r["atc"].display.lower()
+        assert "read back" not in r["atc"].display.lower()
+
+    def test_later_report_with_missing_callsign_asks_for_callsign(self):
+        m = make_mission(config="25", luaw=False)
+        advance_to(m, "departure_checkin")
+        r = m.handle_transmission(
+            airport.FREQS["approach"],
+            "One thousand two hundred climbing three thousand five hundred",
+            m.squawk,
+            "ALT",
+        )
+        assert r["passed"] is False
+        assert r["missing"] == ["your callsign"]
+        assert "say callsign again" in r["atc"].display.lower()
+
+    def test_readback_with_missing_callsign_keeps_readback_correction(self):
+        m = make_mission(config="25")
+        m.handle_transmission(
+            airport.FREQS["clearance"], m.steps["clearance_call"].example)
+        r = m.handle_transmission(
+            airport.FREQS["clearance"],
+            (f"Maintain VFR at or below 2,500, departure frequency 125.4, "
+             f"squawk {m.squawk}."),
+        )
+        assert r["passed"] is False
+        assert r["missing"] == ["your callsign"]
+        assert "read back all instructions" in r["atc"].display.lower()
+        assert "say callsign again" not in r["atc"].display.lower()
+
     def test_taxi_out_requires_complete_current_route(self):
         m = make_mission(config="25", luaw=False)
-        advance_to(m, "ground_readback")
+        advance_to(m, "runup_taxi_readback")
         result = m.handle_transmission(
             airport.FREQS["ground"],
-            f"Runway 25 via Charlie Foxtrot Bravo, Cessna {m.tail_short}.",
+            f"Runway 25 via Golf Bravo, Cessna {m.tail_short}.",
             m.squawk,
             "ALT",
         )
         assert result["passed"] is False
         assert any("bravo one" in item.lower() for item in result["missing"])
 
-    def test_taxi_in_requires_every_explicit_runway_crossing(self):
-        m = make_mission(config="25", luaw=False)
+    def test_taxi_in_requires_the_actual_explicit_runway_crossing(self):
+        m = make_mission(config="15L", luaw=False)
         advance_to(m, "taxi_in_readback")
         result = m.handle_transmission(
             airport.FREQS["ground"],
-            f"Taxi to Above All via Charlie, Cessna {m.tail_short}.",
+            (f"Taxi to Above All via Echo Three Echo Bravo Foxtrot Charlie, "
+             f"Cessna {m.tail_short}."),
             m.squawk,
             "ALT",
         )
         assert result["passed"] is False
         missing = " ".join(result["missing"]).lower()
-        assert "15 right" in missing
-        assert "15 left" in missing
+        assert "runway 25" in missing
 
     @pytest.mark.parametrize(
         ("config", "luaw", "target", "bad_call", "missing"),
@@ -207,9 +258,9 @@ class TestStateIntegrity:
         result = m.handle_transmission(
             airport.FREQS["ground"], m.step().example, m.squawk, "ALT")
         assert result["passed"] is True
-        assert "taxi_out" in m.pending_legs
-        assert m.leg_complete("taxi_out") is not None
-        assert m.leg_complete("taxi_out") is None
+        assert "taxi_to_runup" in m.pending_legs
+        assert m.leg_complete("taxi_to_runup") is not None
+        assert m.leg_complete("taxi_to_runup") is None
 
     def test_issued_leg_becomes_stale_after_state_advances(self):
         m = make_mission(config="25", luaw=False)
@@ -217,12 +268,12 @@ class TestStateIntegrity:
         taxi = m.handle_transmission(
             airport.FREQS["ground"], m.step().example, m.squawk, "ALT")
         assert taxi["passed"] is True
-        assert "taxi_out" in m.pending_legs
+        assert "taxi_to_runup" in m.pending_legs
 
-        tower = m.handle_transmission(
-            airport.FREQS["tower"], m.step().example, m.squawk, "ALT")
-        assert tower["passed"] is True
-        assert m.leg_complete("taxi_out") is None
+        runup = m.handle_transmission(
+            airport.FREQS["ground"], m.step().example, m.squawk, "ALT")
+        assert runup["passed"] is True
+        assert m.leg_complete("taxi_to_runup") is None
 
 
 class TestSayAgain:

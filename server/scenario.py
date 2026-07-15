@@ -19,7 +19,7 @@ import random
 import re
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Literal
 
 from . import airport, ground
 from .atis import Weather, atis_display, atis_spoken, make_weather
@@ -61,6 +61,7 @@ class Step:
     next_id: str | None = None
     push_after: dict | None = None  # {"delay_s":, "atc":, "advance_to":}
     check_xpdr: bool = False
+    transmission_kind: Literal["call", "readback"] = "call"
 
 
 # Single canonical frequency formatter, defined alongside FREQS.
@@ -89,6 +90,9 @@ class Mission:
         self.runway = self.runway_selection.selected_runway
         self.config_id = self.runway  # retained for pattern/config compatibility
         self.cfg = airport.CONFIGS[self.config_id]
+        self.taxi_to_runup_route = ground.CANONICAL_TAXI_ROUTES[
+            ("taxi_to_runup", self.runway)
+        ]
         self.taxi_out_route = ground.CANONICAL_TAXI_ROUTES[("taxi_out", self.runway)]
         self.taxi_in_route = ground.CANONICAL_TAXI_ROUTES[("taxi_in", self.runway)]
         self.runway_operation = ground.RUNWAY_OPERATIONS[self.runway]
@@ -141,6 +145,7 @@ class Mission:
 
     def _build_steps(self) -> dict[str, Step]:
         cfg, wx, rwy = self.cfg, self.wx, self.runway
+        taxi_to_runup = self.taxi_to_runup_route
         taxi_out = self.taxi_out_route
         taxi_in = self.taxi_in_route
         runway_op = self.runway_operation
@@ -185,6 +190,7 @@ class Mission:
 
         add(Step(
             id="clearance_readback", facility="clearance",
+            transmission_kind="readback",
             coach="Read back the clearance: altitude restriction, departure frequency, squawk, callsign.",
             example=(f"Maintain VFR at or below 2,500, departure frequency {dep_freq}, "
                      f"squawk {self.squawk}, Cessna {self.tail_short}."),
@@ -215,15 +221,49 @@ class Mission:
             ],
             atc=AtcReply(
                 "ground",
-                f"{self._cs_disp()}, Santa Barbara Ground, {taxi_out.display_instruction}",
-                f"{self._cs()}, santa barbara ground, {taxi_out.spoken_instruction}",
+                f"{self._cs_disp()}, Santa Barbara Ground, {taxi_to_runup.display_instruction}",
+                f"{self._cs()}, santa barbara ground, {taxi_to_runup.spoken_instruction}",
             ),
             next_id="ground_readback",
         ))
 
         add(Step(
             id="ground_readback", facility="ground",
-            coach="Read back the full taxi instruction — runway, route, and every crossing.",
+            transmission_kind="readback",
+            coach="Read back the runway, route, and run-up-area destination.",
+            example=f"{taxi_to_runup.display_instruction.rstrip('.')}, Cessna {self.tail_short}.",
+            items=self._route_items(taxi_to_runup.readback_requirements)
+            + [self._item_callsign()],
+            atc=AtcReply("ground",
+                         f"{self._cs_disp()}, readback correct.",
+                         f"{self._cs()}, readback correct."),
+            actions=[{"type": "move", "view": "ground", "path": taxi_to_runup.path,
+                      "leg": "taxi_to_runup", "speed": "taxi"}],
+            next_id="runup_complete",
+        ))
+
+        add(Step(
+            id="runup_complete", facility="ground",
+            coach=("Complete the run-up in the assigned area, stay on Ground 121.7, "
+                   "then report run-up complete."),
+            example=(f"Santa Barbara Ground, Cessna {self.tail}, "
+                     "run-up complete."),
+            items=[
+                self._item_callsign(),
+                Item("runup", "run-up complete", [r"run ?up complete", r"runup complete"]),
+            ],
+            atc=AtcReply(
+                "ground",
+                f"{self._cs_disp()}, Santa Barbara Ground, {taxi_out.display_instruction}",
+                f"{self._cs()}, santa barbara ground, {taxi_out.spoken_instruction}",
+            ),
+            next_id="runup_taxi_readback",
+        ))
+
+        add(Step(
+            id="runup_taxi_readback", facility="ground",
+            transmission_kind="readback",
+            coach="Read back the runway and taxi route from the run-up area to hold short.",
             example=f"{taxi_out.display_instruction.rstrip('.')}, Cessna {self.tail_short}.",
             items=self._route_items(taxi_out.readback_requirements) + [self._item_callsign()],
             atc=AtcReply("ground",
@@ -244,8 +284,8 @@ class Mission:
 
         add(Step(
             id="tower_checkin", facility="tower",
-            coach=("Taxi to the hold-short line. When you're there and run-up is done, "
-                   "switch to Tower 119.7 and report ready for departure."),
+            coach=("Taxi to the hold-short line, switch to Tower 119.7, and report "
+                   "ready for departure."),
             example=f"Santa Barbara Tower, Cessna {self.tail}, holding short Runway {rwy}, ready for departure.",
             items=[
                 self._item_callsign(),
@@ -264,6 +304,7 @@ class Mission:
         if self.luaw:
             add(Step(
                 id="luaw_readback", facility="tower",
+                transmission_kind="readback",
                 coach="Read back: line up and wait, runway, callsign. Then taxi onto the runway and hold.",
                 example=f"Runway {rwy}, line up and wait, Cessna {self.tail_short}.",
                 items=[
@@ -280,6 +321,7 @@ class Mission:
 
         add(Step(
             id="takeoff_readback", facility="tower",
+            transmission_kind="readback",
             coach="Read back the takeoff clearance: cleared for takeoff, runway, callsign.",
             example=f"Cleared for takeoff Runway {rwy}, {cfg['departure_instruction'].split(' approved')[0]}, Cessna {self.tail_short}.",
             items=[
@@ -305,6 +347,7 @@ class Mission:
 
         add(Step(
             id="handoff_readback", facility="tower",
+            transmission_kind="readback",
             coach="Acknowledge the handoff, then switch to Departure on 125.4.",
             example=f"Over to Departure, Cessna {self.tail_short}.",
             items=[
@@ -338,6 +381,7 @@ class Mission:
 
         add(Step(
             id="dep_ack", facility="approach",
+            transmission_kind="readback",
             coach="Acknowledge with a short readback: own navigation, altitude restriction, callsign.",
             example=f"Own navigation, at or below 2,500 until leaving the Charlie, Cessna {self.tail_short}.",
             items=[
@@ -376,6 +420,7 @@ class Mission:
 
         add(Step(
             id="approach_readback", facility="approach",
+            transmission_kind="readback",
             coach="Read back: expect the runway, tower frequency, callsign. Then switch to Tower 119.7.",
             example=f"Expect Runway {rwy}, over to Tower 119.7, Cessna {self.tail_short}.",
             items=[
@@ -410,6 +455,7 @@ class Mission:
 
         add(Step(
             id="arrival_readback", facility="tower",
+            transmission_kind="readback",
             coach="Read back the pattern entry, runway, and the report point.",
             example=f"{arr['display'].rstrip('.')}, Cessna {self.tail_short}.",
             items=[Item(k, lbl, pats) for k, lbl, pats in arr["readback_items"]]
@@ -439,6 +485,7 @@ class Mission:
 
         add(Step(
             id="landing_readback", facility="tower",
+            transmission_kind="readback",
             coach="Read back the landing clearance: cleared to land, runway, callsign.",
             example=f"Cleared to land Runway {rwy}, Cessna {self.tail_short}.",
             items=[
@@ -458,6 +505,7 @@ class Mission:
 
         add(Step(
             id="exit_readback", facility="tower",
+            transmission_kind="readback",
             coach="Read back the runway exit and the ground frequency.",
             example=f"{runway_op.exit_display.rstrip('.')}, Cessna {self.tail_short}.",
             items=self._route_items(runway_op.exit_readback_requirements)
@@ -488,6 +536,7 @@ class Mission:
 
         add(Step(
             id="taxi_in_readback", facility="ground",
+            transmission_kind="readback",
             coach="Read back the taxi-in route (and any crossing!), then taxi to Above All.",
             example=f"{taxi_in.display_instruction.rstrip('.')}, Cessna {self.tail_short}.",
             items=self._route_items(taxi_in.readback_requirements) + [self._item_callsign()],
@@ -561,6 +610,12 @@ class Mission:
                     step.facility,
                     f"Aircraft calling {airport.FACILITY_NAMES[step.facility]}, say again.",
                     f"aircraft calling {airport.FACILITY_NAMES[step.facility].lower()}, say again.")
+            elif step.transmission_kind == "call" \
+                    and any(i.key == "callsign" for i in missing_req):
+                reply = AtcReply(
+                    step.facility,
+                    f"Aircraft calling {airport.FACILITY_NAMES[step.facility]}, say callsign again.",
+                    f"aircraft calling {airport.FACILITY_NAMES[step.facility].lower()}, say callsign again.")
             else:
                 prev = self._prev_instruction()
                 body = prev or "I need a full readback."
@@ -644,6 +699,8 @@ class Mission:
         expected_state = self.pending_legs.pop(leg, None)
         if expected_state is None or expected_state != self.current:
             return None
+        if leg == "taxi_to_runup":
+            return {"coach": self.steps["runup_complete"].coach}
         if leg == "taxi_out":
             return {"coach": self.steps["tower_checkin"].coach}
         if leg == "climb_out":

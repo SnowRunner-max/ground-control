@@ -21,7 +21,10 @@ from .conftest import ROOT, debug_step, new_mission, transmit_text
 
 # Legs that trigger a server push over the WebSocket (see server/scenario.py
 # Mission.leg_complete). All other legs (line_up, exit) are silent.
-PUSHING_LEGS = {"taxi_out", "climb_out", "cruise_east", "to_final", "landing_roll", "taxi_in"}
+PUSHING_LEGS = {
+    "taxi_to_runup", "taxi_out", "climb_out", "cruise_east", "to_final",
+    "landing_roll", "taxi_in",
+}
 
 WEB = ROOT / "web"
 
@@ -74,7 +77,7 @@ def test_full_mission_completes(app, api):
     with connect(ws_url(app)) as ws:
         luaw = debug_step(api)["luaw"]
         debrief = None
-        for _ in range(25):
+        for _ in range(30):
             step = debug_step(api)
             was_luaw_readback = step["step_id"] == "luaw_readback"
             _, pushes = fly_step(api, ws, step)

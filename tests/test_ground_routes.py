@@ -22,21 +22,33 @@ from server.ground import (
 
 
 EXPECTED_ROUTES = {
-    ("taxi_out", "25"): {
-        "taxiways": ("C", "F", "B", "B1"),
+    ("taxi_to_runup", "25"): {
+        "taxiways": ("C", "G"),
         "crossings": (),
         "start": "above_all_parking",
+        "end": "runup_25_g",
+    },
+    ("taxi_out", "25"): {
+        "taxiways": ("G", "B", "B1"),
+        "crossings": (),
+        "start": "runup_25_g",
         "end": "hold_short_25_b1",
     },
-    ("taxi_out", "15L"): {
-        "taxiways": ("C", "E"),
+    ("taxi_to_runup", "15L"): {
+        "taxiways": ("C", "F"),
         "crossings": (),
         "start": "above_all_parking",
+        "end": "runup_15l_f",
+    },
+    ("taxi_out", "15L"): {
+        "taxiways": ("F", "C", "E"),
+        "crossings": (),
+        "start": "runup_15l_f",
         "end": "hold_short_15l_e",
     },
     ("taxi_in", "25"): {
         "taxiways": ("C",),
-        "crossings": ("15R", "15L"),
+        "crossings": (),
         "start": "clear_of_25_c",
         "end": "above_all_parking",
     },
@@ -102,6 +114,16 @@ def test_taxi_out_ends_at_matching_hold_short_node():
         assert end.runway == runway
 
 
+def test_taxi_to_runup_ends_at_matching_runup_node():
+    for runway in ("25", "15L"):
+        route = CANONICAL_TAXI_ROUTES[("taxi_to_runup", runway)]
+        end = GROUND_NODES[route.end]
+        assert route.start == "above_all_parking"
+        assert route.hold_short is None
+        assert end.kind == "run_up"
+        assert end.runway == runway
+
+
 def test_taxi_in_returns_to_above_all():
     for runway in ("25", "15L"):
         route = CANONICAL_TAXI_ROUTES[("taxi_in", runway)]
@@ -132,15 +154,20 @@ def test_unsupported_route_is_rejected():
 
 
 def test_route_clearances_are_derived_in_traversal_order():
+    assert CANONICAL_TAXI_ROUTES[("taxi_to_runup", "25")].display_instruction == (
+        "Runway 25, taxi via Charlie, Golf to the run-up area."
+    )
     assert CANONICAL_TAXI_ROUTES[("taxi_out", "25")].display_instruction == (
-        "Runway 25, taxi via Charlie, Foxtrot, Bravo, Bravo One."
+        "Runway 25, taxi via Golf, Bravo, Bravo One."
+    )
+    assert CANONICAL_TAXI_ROUTES[("taxi_to_runup", "15L")].display_instruction == (
+        "Runway 15 Left, taxi via Charlie, Foxtrot to the run-up area."
     )
     assert CANONICAL_TAXI_ROUTES[("taxi_out", "15L")].display_instruction == (
-        "Runway 15 Left, taxi via Charlie, Echo."
+        "Runway 15 Left, taxi via Foxtrot, Charlie, Echo."
     )
     assert CANONICAL_TAXI_ROUTES[("taxi_in", "25")].display_instruction == (
-        "Taxi to Above All Aviation via Charlie, cross Runway 15 Right, "
-        "cross Runway 15 Left."
+        "Taxi to Above All Aviation via Charlie."
     )
     assert CANONICAL_TAXI_ROUTES[("taxi_in", "15L")].display_instruction == (
         "Taxi to Above All Aviation via Echo Three, Echo, cross Runway 25, "
@@ -167,3 +194,34 @@ def test_runway_operations_use_current_boundaries_and_exit_names():
     assert runway15.line_up_nodes == ("hold_short_15l_e", "runway15l_threshold")
     assert runway15.exit_nodes == ("runway15l_exit_e3", "clear_of_15l_e3")
     assert runway15.exit_display.startswith("Turn left at Echo Three")
+
+
+def test_charlie_bends_around_15_runway_ends_without_crossing_them():
+    route = CANONICAL_TAXI_ROUTES[("taxi_in", "25")]
+    assert route.taxiways == ("C",)
+    assert route.crossings == ()
+    assert all(edge.kind == "taxiway" for edge in route.edges if edge.taxiway == "C")
+
+
+def test_delta_is_a_distinct_taxiway_branch_and_crosses_only_runway_25():
+    delta = [edge for edge in GROUND_EDGES if edge.taxiway == "D"]
+    assert delta
+    crossings = [edge for edge in delta if edge.kind == "runway_crossing"]
+    assert len(crossings) == 1
+    assert crossings[0].crosses_runway == "25"
+    assert any(
+        frozenset((edge.start, edge.end))
+        == frozenset(("c_d_junction", "hold_short_15r_d"))
+        for edge in delta
+    )
+
+
+def test_all_four_charted_runup_areas_are_nodes_with_access_edges():
+    runups = {node_id for node_id, node in GROUND_NODES.items() if node.kind == "run_up"}
+    assert runups == {"runup_7_a", "runup_15r_c", "runup_15l_f", "runup_25_g"}
+    for node_id in runups:
+        access = [
+            edge for edge in GROUND_EDGES
+            if edge.kind == "run_up_access" and node_id in {edge.start, edge.end}
+        ]
+        assert len(access) == 1

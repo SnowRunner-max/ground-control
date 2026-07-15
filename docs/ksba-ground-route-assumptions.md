@@ -2,16 +2,22 @@
 
 ## Status
 
-The routes below are chart-derived training routes implemented during Phase 2
-of the Above All ground-routing plan. Their geometry and topology have been
-checked against FAA airport diagram AL-378, cycle 2607, effective 9 July through
-6 August 2026.
+The routes below are training routes implemented during Phase 2 of the Above
+All ground-routing plan. Pavement geometry and connections were reconciled
+against the City of Santa Barbara Airport Layout Plan approved 29 October 2024;
+operational taxiway names were then checked against FAA airport diagram AL-378,
+cycle 2607, effective 9 July through 6 August 2026.
 
-They have **not yet been reviewed by a KSBA-familiar instructor or controller**.
-Until that review occurs, they must be treated as representative simulation
-routes rather than predictions of a clearance that Ground will issue. Actual
-operations remain subject to ATIS, NOTAMs, closures, traffic, and controller
-instructions.
+- City layout plan: <https://flysba.santabarbaraca.gov/sites/default/files/2025-02/Airport%20Layout%20Plan_1.pdf>
+- Current simplified diagram: <https://skyvector.com/files/tpp/2607/pdf/00378AD.PDF>
+
+Local-pilot feedback established two corrections to the earlier graph: Charlie
+bends around the north ends of Runways 15R and 15L rather than crossing them,
+and Delta must be represented as the taxiway serving the 15R end. The exact
+representative clearances still need controller/instructor review, so these
+remain simulation routes rather than predictions of what Ground will issue.
+Actual operations remain subject to ATIS, NOTAMs, closures, traffic, and
+controller instructions.
 
 ## Above All Location
 
@@ -24,15 +30,24 @@ node.
 
 | Operation | Runway | Taxiways | Explicit runway crossings |
 | --- | --- | --- | --- |
-| Taxi out | 25 | C, F, B, B1 | None |
-| Taxi out | 15L | C, E | None |
-| Taxi in | 25 | C | 15R, then 15L |
+| Taxi to run-up | 25 | C, G | None |
+| Run-up to hold short | 25 | G, B, B1 | None |
+| Taxi to run-up | 15L | C, F | None |
+| Run-up to hold short | 15L | F, C, E | None |
+| Taxi in | 25 | C | None |
 | Taxi in | 15L | E3, E, B, F, C | 25 |
 
-Taxi-out routes end at a named hold-short node. Taxi-in routes begin at a
-named runway-clear node after the Tower-directed exit and end at
-`above_all_parking`. Runway entry and exit boundaries exist in the graph but
-are intentionally excluded from Ground taxi routes.
+The first Ground clearance ends at a runway-specific run-up node. After the
+pilot reports run-up complete on Ground, a second clearance ends at the named
+hold-short node. Taxi-in routes begin at a named runway-clear node after the
+Tower-directed exit and end at `above_all_parking`. Runway entry and exit
+boundaries exist in the graph but are intentionally excluded from Ground taxi
+routes.
+
+All four run-up areas shown on AL-378 are represented: Alpha near Runway 7,
+Charlie near Runway 15R, Foxtrot adjacent to Runway 15L, and Golf near Runway
+25. The current mission assigns the Foxtrot area to 15L departures and the Golf
+area to 25 departures.
 
 ## Review Checklist
 
@@ -40,10 +55,10 @@ Before removing the pending-review status, confirm with a KSBA-familiar pilot
 or instructor:
 
 1. The representative Above All aircraft parking point and normal ramp exit.
-2. The typical Runway 25 route through C, F, B, and B1.
-3. The typical Runway 15L route through C and E.
+2. The typical Runway 25 routing through the Golf run-up area, then G, B, B1.
+3. The typical Runway 15L routing through the Foxtrot run-up area, then F, C, E.
 4. Whether a Runway 25 landing normally exits at C for this training scenario,
-   followed by the modeled C crossings of 15R and 15L.
+   followed by Charlie around (not across) the 15R and 15L runway ends.
 5. Whether a Runway 15L landing normally uses E3 and E, crosses Runway 25 at E,
    then returns via B, F, and C.
 6. The exact hold-short and runway-clear locations used by each route.

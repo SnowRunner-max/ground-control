@@ -1,10 +1,12 @@
 """Full-mission happy paths and mission invariants."""
 
+import pytest
+
 from server import airport, ground
 from server.phraseology import normalize
 from server.scenario import Mission
 
-from .conftest import fly_mission
+from .conftest import find_seed, fly_mission
 
 
 class TestHappyPath:
@@ -54,13 +56,21 @@ class TestHappyPath:
 
     def test_current_routes_drive_phraseology_and_movement(self, mission25, mission15):
         for mission in (mission25, mission15):
+            taxi_to_runup = mission.taxi_to_runup_route
             taxi_out = mission.taxi_out_route
             taxi_in = mission.taxi_in_route
             runway_op = mission.runway_operation
 
             assert mission.steps["ground_call"].atc.display.endswith(
+                taxi_to_runup.display_instruction)
+            assert mission.steps["ground_readback"].actions[0]["path"] == (
+                taxi_to_runup.path
+            )
+            assert mission.steps["runup_complete"].atc.display.endswith(
                 taxi_out.display_instruction)
-            assert mission.steps["ground_readback"].actions[0]["path"] == taxi_out.path
+            assert mission.steps["runup_taxi_readback"].actions[0]["path"] == (
+                taxi_out.path
+            )
             assert mission.steps["ground_inbound"].atc.display.endswith(
                 taxi_in.display_instruction)
             assert mission.steps["taxi_in_readback"].actions[0]["path"] == taxi_in.path
@@ -142,6 +152,48 @@ class TestInvariants:
             f"request VFR departure to the east at three thousand five hundred",
         )
         assert r["passed"], r["missing"]
+
+    def test_punctuation_split_alpha_callsign_passes_clearance_call(self):
+        m = Mission(callsign="N3068S", seed=0)
+        r = m.handle_transmission(
+            airport.FREQS["clearance"],
+            ("Santa Barbara Clearance, Cesna three zero six, eight Sierra "
+             "at Above All Aviation with information "
+             f"{m.wx.letter}, request VFR departure to the east at "
+             "three five zero zero."),
+        )
+        assert r["passed"], r["missing"]
+
+    @pytest.mark.parametrize(
+        "spoken_tail",
+        [
+            "three zero six, uh, eight Sierra",
+            "three zero six, six, eight Sierra",
+        ],
+    )
+    def test_disfluent_alpha_callsign_passes_clearance_call(self, spoken_tail):
+        m = Mission(callsign="N3068S", seed=0)
+        r = m.handle_transmission(
+            airport.FREQS["clearance"],
+            (f"Santa Barbara Clearance, Cessna {spoken_tail} at Above All "
+             f"Aviation with information {m.wx.letter}, request VFR departure "
+             "to the east at three five zero zero."),
+        )
+        assert r["passed"], r["missing"]
+
+    def test_steps_classify_calls_and_readbacks_explicitly(self):
+        m = Mission(seed=find_seed(luaw=True))
+        readbacks = {
+            "clearance_readback", "ground_readback", "runup_taxi_readback",
+            "luaw_readback", "takeoff_readback", "handoff_readback",
+            "dep_ack", "approach_readback", "arrival_readback",
+            "landing_readback", "exit_readback", "taxi_in_readback",
+        }
+        assert {step_id for step_id, step in m.steps.items()
+                if step.transmission_kind == "readback"} == readbacks
+        assert all(step.transmission_kind == "call"
+                   for step_id, step in m.steps.items()
+                   if step_id not in readbacks)
 
     def test_atc_spoken_text_contains_key_numbers(self):
         """What ATC says aloud must normalize back to the graded values."""

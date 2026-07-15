@@ -189,6 +189,21 @@ class TestApi:
         assert base64.b64decode(res["atc"]["audio_b64"]) == FAKE_WAV
         assert main.mission.current == "clearance_readback"
 
+    async def test_disfluent_callsign_does_not_trigger_correction(self, client):
+        await new_mission(client, callsign="N3068S", seed=0)
+        m = main.mission
+        res = await transmit(
+            client,
+            airport.FREQS["clearance"],
+            ("Santa Barbara Clearance, Cessna three zero six, uh, eight "
+             "Sierra at Above All Aviation with information "
+             f"{m.wx.letter}, request VFR departure."),
+        )
+        assert res["passed"] is True
+        assert res["missing"] == []
+        assert "Missing:" not in res["coach"]
+        assert "Try:" not in res["coach"]
+
     async def test_transmit_preserves_atc_text_when_tts_fails(self, client, monkeypatch):
         await new_mission(client)
 
@@ -233,17 +248,17 @@ class TestApi:
     async def test_ws_leg_complete_coach_push(self, client):
         await new_mission(client)
         m = main.mission
-        # advance through the taxi clearance so taxi_out is the active leg
+        # advance through the first taxi clearance so the run-up leg is active
         for step_id in ("clearance_call", "clearance_readback", "ground_call",
                         "ground_readback"):
             step = m.steps[step_id]
             res = await transmit(client, airport.FREQS[step.facility], step.example,
                                  m.squawk, "ALT")
             assert res["passed"] is True, (step_id, res["missing"])
-        ws = FakeWebSocket({"type": "leg_complete", "leg": "taxi_out"})
+        ws = FakeWebSocket({"type": "leg_complete", "leg": "taxi_to_runup"})
         await main.ws_endpoint(ws)
         assert ws.sent[0]["type"] == "push"
-        assert "Tower" in ws.sent[0]["coach"]
+        assert "run-up complete" in ws.sent[0]["coach"]
 
     async def test_ws_mission_complete_debrief(self, client):
         await new_mission(client)

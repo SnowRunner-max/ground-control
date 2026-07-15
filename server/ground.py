@@ -23,18 +23,20 @@ NodeKind = Literal[
     "parking",
     "ramp_exit",
     "junction",
+    "run_up",
     "hold_short",
     "runway",
     "runway_clear",
 ]
 EdgeKind = Literal[
     "ramp",
+    "run_up_access",
     "taxiway",
     "runway_crossing",
     "runway_entry",
     "runway_exit",
 ]
-RouteOperation = Literal["taxi_out", "taxi_in"]
+RouteOperation = Literal["taxi_to_runup", "taxi_out", "taxi_in"]
 InstructionKind = Literal["taxiway", "cross_runway"]
 
 KNOWN_TAXIWAYS = frozenset({
@@ -42,7 +44,7 @@ KNOWN_TAXIWAYS = frozenset({
     "B", "B1", "C", "D", "E", "E1", "E2", "E3", "F", "G", "H",
 })
 SUPPORTED_RUNWAYS = frozenset({"25", "15L"})
-ROUTE_REVIEW_STATUS = "chart-derived; KSBA instructor review pending"
+ROUTE_REVIEW_STATUS = "city-ALP/FAA-chart reconciled; operational review ongoing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,26 +125,32 @@ class TaxiRoute:
 
     @property
     def display_instruction(self) -> str:
-        prefix = (
-            f"Runway {_runway_display(self.runway)}, taxi via "
-            if self.operation == "taxi_out"
-            else "Taxi to Above All Aviation via "
-        )
-        return prefix + _format_instruction_elements(self.instructions, spoken=False) + "."
+        if self.operation == "taxi_in":
+            prefix, suffix = "Taxi to Above All Aviation via ", "."
+        elif self.operation == "taxi_to_runup":
+            prefix = f"Runway {_runway_display(self.runway)}, taxi via "
+            suffix = " to the run-up area."
+        else:
+            prefix = f"Runway {_runway_display(self.runway)}, taxi via "
+            suffix = "."
+        return prefix + _format_instruction_elements(self.instructions, spoken=False) + suffix
 
     @property
     def spoken_instruction(self) -> str:
-        prefix = (
-            f"runway {_runway_spoken(self.runway)}, taxi via "
-            if self.operation == "taxi_out"
-            else "taxi to above all aviation via "
-        )
-        return prefix + _format_instruction_elements(self.instructions, spoken=True) + "."
+        if self.operation == "taxi_in":
+            prefix, suffix = "taxi to above all aviation via ", "."
+        elif self.operation == "taxi_to_runup":
+            prefix = f"runway {_runway_spoken(self.runway)}, taxi via "
+            suffix = " to the run-up area."
+        else:
+            prefix = f"runway {_runway_spoken(self.runway)}, taxi via "
+            suffix = "."
+        return prefix + _format_instruction_elements(self.instructions, spoken=True) + suffix
 
     @property
     def readback_requirements(self) -> tuple[ReadbackRequirement, ...]:
         requirements: list[ReadbackRequirement] = []
-        if self.operation == "taxi_out":
+        if self.operation != "taxi_in":
             requirements.append(ReadbackRequirement(
                 "runway",
                 f"Runway {_runway_display(self.runway)}",
@@ -152,6 +160,12 @@ class TaxiRoute:
         route_pattern = ".*".join(_taxiway_pattern(code) for code in self.taxiways)
         route_label = "via " + ", ".join(_taxiway_display(code) for code in self.taxiways)
         requirements.append(ReadbackRequirement("route", route_label, (route_pattern,)))
+        if self.operation == "taxi_to_runup":
+            requirements.append(ReadbackRequirement(
+                "destination",
+                "the run-up area",
+                (r"\brun ?up area\b", r"\brunup area\b"),
+            ))
         requirements.extend(
             ReadbackRequirement(
                 f"cross_{runway.lower()}",
@@ -313,36 +327,62 @@ def _node(
     return GroundNode(id=id, position=(x, y), kind=kind, runway=runway)
 
 
-# Coordinates were reviewed as a labeled overlay on the cycle-2607 chart. The
-# graph contains only the pavement needed by the two currently supported runway
-# configurations; it is intentionally not a general model of every KSBA route.
+# Coordinates were reconciled against the City of Santa Barbara Airport Layout
+# Plan approved 29 October 2024, then checked as a labeled overlay on FAA
+# diagram AL-378 cycle 2607 for the current taxiway identifiers. The city plan
+# supplies the detailed pavement geometry; the FAA diagram supplies operational
+# labels. The graph covers the supported missions plus the charted run-up areas
+# and the Delta branch called out during local-pilot review.
 GROUND_NODES: dict[str, GroundNode] = {
     # Above All / north ramp
     "above_all_parking": _node("above_all_parking", 0.684, 0.237, "parking"),
     "above_all_ramp_exit": _node("above_all_ramp_exit", 0.700, 0.263, "ramp_exit"),
     "c_f_junction": _node("c_f_junction", 0.766, 0.285),
     "c_e_junction": _node("c_e_junction", 0.650, 0.290),
+    "c_g_junction": _node("c_g_junction", 0.866, 0.314),
 
-    # Runway 25 departure via C, F, B, B1
+    # Four run-up areas depicted on FAA diagram AL-378. The two assigned to
+    # supported departures are leaves off Foxtrot (15L) and Golf (25); the
+    # Charlie/15R and Alpha/7 pads are retained as first-class map nodes too.
+    "f_runup_entry": _node("f_runup_entry", 0.766, 0.350),
+    "runup_15l_f": _node("runup_15l_f", 0.690, 0.360, "run_up", "15L"),
+    "g_b_junction": _node("g_b_junction", 0.875, 0.390),
+    "runup_25_g": _node("runup_25_g", 0.897, 0.360, "run_up", "25"),
+    "c_runup_15r_entry": _node("c_runup_15r_entry", 0.475, 0.405),
+    "runup_15r_c": _node("runup_15r_c", 0.445, 0.405, "run_up", "15R"),
+    "a_runup_7_entry": _node("a_runup_7_entry", 0.265, 0.525),
+    "runup_7_a": _node("runup_7_a", 0.220, 0.522, "run_up", "7"),
+
+    # Runway 25 hold-short and movement geometry at B1
     "f_b_junction": _node("f_b_junction", 0.766, 0.389),
     "b_b1_junction": _node("b_b1_junction", 0.783, 0.389),
     "hold_short_25_b1": _node("hold_short_25_b1", 0.783, 0.432, "hold_short", "25"),
     "runway25_threshold": _node("runway25_threshold", 0.791, 0.466, "runway", "25"),
     "runway25_touchdown": _node("runway25_touchdown", 0.724, 0.469, "runway", "25"),
 
-    # Runway 15L departure via C, E
+    # Runway 15L hold-short and movement geometry at E
     "hold_short_15l_e": _node("hold_short_15l_e", 0.631, 0.326, "hold_short", "15L"),
     "runway15l_threshold": _node("runway15l_threshold", 0.634, 0.336, "runway", "15L"),
     "runway15l_touchdown": _node("runway15l_touchdown", 0.638, 0.357, "runway", "15L"),
 
-    # Runway 25 exit at C, then C across both 15/33 runways
+    # Runway 25 exit at C. Charlie bends around the north ends of both 15/33
+    # runways; these are ordinary centerline points, not runway crossings.
     "runway25_exit_c": _node("runway25_exit_c", 0.459, 0.478, "runway", "25"),
     "clear_of_25_c": _node("clear_of_25_c", 0.438, 0.433, "runway_clear", "25"),
     "c_west": _node("c_west", 0.525, 0.374),
-    "c_hold_15r_west": _node("c_hold_15r_west", 0.560, 0.363, "hold_short", "15R"),
-    "c_clear_15r_east": _node("c_clear_15r_east", 0.581, 0.346, "runway_clear", "15R"),
-    "c_hold_15l_west": _node("c_hold_15l_west", 0.600, 0.333, "hold_short", "15L"),
-    "c_clear_15l_east": _node("c_clear_15l_east", 0.623, 0.310, "runway_clear", "15L"),
+    "c_d_junction": _node("c_d_junction", 0.560, 0.363),
+    "c_between_thresholds": _node("c_between_thresholds", 0.581, 0.346),
+    "c_e_curve_west": _node("c_e_curve_west", 0.600, 0.333),
+    "c_e_curve_east": _node("c_e_curve_east", 0.623, 0.310),
+
+    # Taxiway Delta from Charlie at the 15R end, continuing south across 25.
+    # This makes the charted "off 15R at Delta" movement representable even
+    # though 15R is not yet a selectable mission runway.
+    "hold_short_15r_d": _node("hold_short_15r_d", 0.558, 0.390, "hold_short", "15R"),
+    "runway15r_threshold": _node("runway15r_threshold", 0.566, 0.410, "runway", "15R"),
+    "d_hold_25_north": _node("d_hold_25_north", 0.575, 0.438, "hold_short", "25"),
+    "d_clear_25_south": _node("d_clear_25_south", 0.594, 0.508, "runway_clear", "25"),
+    "d_south": _node("d_south", 0.625, 0.680),
 
     # Runway 15L exit at E3, then E across Runway 25 to B, F, C
     "runway15l_exit_e3": _node("runway15l_exit_e3", 0.673, 0.555, "runway", "15L"),
@@ -372,14 +412,28 @@ def _edge(
 
 
 GROUND_EDGES: tuple[GroundEdge, ...] = (
-    # North ramp and the two departure branches.
+    # North ramp and Charlie spine.
     _edge("above_all_parking", "above_all_ramp_exit", "ramp"),
     _edge("above_all_ramp_exit", "c_f_junction", "taxiway", "C"),
     _edge("above_all_ramp_exit", "c_e_junction", "taxiway", "C"),
-    _edge("c_f_junction", "f_b_junction", "taxiway", "F"),
+    _edge("c_f_junction", "c_g_junction", "taxiway", "C"),
+
+    # Foxtrot/15L and Golf/25 run-up areas and the east departure branches.
+    _edge("c_f_junction", "f_runup_entry", "taxiway", "F"),
+    _edge("f_runup_entry", "f_b_junction", "taxiway", "F"),
+    _edge("f_runup_entry", "runup_15l_f", "run_up_access", "F"),
+    _edge("c_g_junction", "g_b_junction", "taxiway", "G"),
+    _edge("g_b_junction", "runup_25_g", "run_up_access", "G"),
+    _edge("f_b_junction", "g_b_junction", "taxiway", "B"),
     _edge("f_b_junction", "b_b1_junction", "taxiway", "B"),
     _edge("b_b1_junction", "hold_short_25_b1", "taxiway", "B1"),
     _edge("c_e_junction", "hold_short_15l_e", "taxiway", "E"),
+
+    # The other two charted run-up pads (not assigned to a supported mission).
+    _edge("clear_of_25_c", "c_runup_15r_entry", "taxiway", "C"),
+    _edge("c_runup_15r_entry", "c_west", "taxiway", "C"),
+    _edge("c_runup_15r_entry", "runup_15r_c", "run_up_access", "C"),
+    _edge("a_runup_7_entry", "runup_7_a", "run_up_access", "A"),
 
     # Runway entry boundaries are represented but are not part of taxi routes.
     _edge("hold_short_25_b1", "runway25_threshold", "runway_entry", bidirectional=False),
@@ -387,12 +441,19 @@ GROUND_EDGES: tuple[GroundEdge, ...] = (
 
     # Runway 25 exit and current Taxiway C route back to the north ramp.
     _edge("runway25_exit_c", "clear_of_25_c", "runway_exit", bidirectional=False),
-    _edge("clear_of_25_c", "c_west", "taxiway", "C"),
-    _edge("c_west", "c_hold_15r_west", "taxiway", "C"),
-    _edge("c_hold_15r_west", "c_clear_15r_east", "runway_crossing", "C", "15R"),
-    _edge("c_clear_15r_east", "c_hold_15l_west", "taxiway", "C"),
-    _edge("c_hold_15l_west", "c_clear_15l_east", "runway_crossing", "C", "15L"),
-    _edge("c_clear_15l_east", "c_e_junction", "taxiway", "C"),
+    _edge("c_west", "c_d_junction", "taxiway", "C"),
+    _edge("c_d_junction", "c_between_thresholds", "taxiway", "C"),
+    _edge("c_between_thresholds", "c_e_curve_west", "taxiway", "C"),
+    _edge("c_e_curve_west", "c_e_curve_east", "taxiway", "C"),
+    _edge("c_e_curve_east", "c_e_junction", "taxiway", "C"),
+
+    # Delta is a separate branch; only its crossing of Runway 25 is a runway
+    # crossing. Charlie itself never crosses 15R or 15L.
+    _edge("c_d_junction", "hold_short_15r_d", "taxiway", "D"),
+    _edge("hold_short_15r_d", "runway15r_threshold", "runway_entry", bidirectional=False),
+    _edge("c_d_junction", "d_hold_25_north", "taxiway", "D"),
+    _edge("d_hold_25_north", "d_clear_25_south", "runway_crossing", "D", "25"),
+    _edge("d_clear_25_south", "d_south", "taxiway", "D"),
 
     # Runway 15L exit and current E/B/F/C route back to Above All.
     _edge("runway15l_exit_e3", "clear_of_15l_e3", "runway_exit", bidirectional=False),
@@ -411,15 +472,17 @@ RUNWAY_BOUNDARIES: dict[frozenset[str], tuple[EdgeKind, str]] = {
     frozenset(("hold_short_15l_e", "runway15l_threshold")): ("runway_entry", "15L"),
     frozenset(("runway25_exit_c", "clear_of_25_c")): ("runway_exit", "25"),
     frozenset(("runway15l_exit_e3", "clear_of_15l_e3")): ("runway_exit", "15L"),
-    frozenset(("c_hold_15r_west", "c_clear_15r_east")): ("runway_crossing", "15R"),
-    frozenset(("c_hold_15l_west", "c_clear_15l_east")): ("runway_crossing", "15L"),
+    frozenset(("hold_short_15r_d", "runway15r_threshold")): ("runway_entry", "15R"),
+    frozenset(("d_hold_25_north", "d_clear_25_south")): ("runway_crossing", "25"),
     frozenset(("e_hold_25_south", "e_clear_25_north")): ("runway_crossing", "25"),
 }
 
 
 ROUTE_ENDPOINTS: dict[tuple[RouteOperation, str], tuple[str, str]] = {
-    ("taxi_out", "25"): ("above_all_parking", "hold_short_25_b1"),
-    ("taxi_out", "15L"): ("above_all_parking", "hold_short_15l_e"),
+    ("taxi_to_runup", "25"): ("above_all_parking", "runup_25_g"),
+    ("taxi_out", "25"): ("runup_25_g", "hold_short_25_b1"),
+    ("taxi_to_runup", "15L"): ("above_all_parking", "runup_15l_f"),
+    ("taxi_out", "15L"): ("runup_15l_f", "hold_short_15l_e"),
     ("taxi_in", "25"): ("clear_of_25_c", "above_all_parking"),
     ("taxi_in", "15L"): ("clear_of_15l_e3", "above_all_parking"),
 }
@@ -485,7 +548,8 @@ def validate_ground_graph() -> None:
         x, y = node.position
         if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
             raise ValueError(f"ground node {node_id!r} is outside the chart")
-        if node.kind in {"hold_short", "runway", "runway_clear"} and not node.runway:
+        if node.kind in {"run_up", "hold_short", "runway", "runway_clear"} \
+                and not node.runway:
             raise ValueError(f"ground node {node_id!r} requires a runway")
 
     pairs: set[frozenset[str]] = set()
@@ -500,7 +564,8 @@ def validate_ground_graph() -> None:
         pairs.add(pair)
         if edge.taxiway is not None and edge.taxiway not in KNOWN_TAXIWAYS:
             raise ValueError(f"unknown current taxiway {edge.taxiway!r}")
-        if edge.kind in {"taxiway", "runway_crossing"} and edge.taxiway is None:
+        if edge.kind in {"run_up_access", "taxiway", "runway_crossing"} \
+                and edge.taxiway is None:
             raise ValueError(f"{edge.kind} edge requires a taxiway: {edge}")
         if edge.kind == "runway_crossing" and edge.crosses_runway is None:
             raise ValueError(f"runway crossing is not identified: {edge}")
@@ -545,6 +610,9 @@ def build_taxi_route(operation: RouteOperation, runway: str) -> TaxiRoute:
     if operation == "taxi_out":
         if end_node.kind != "hold_short" or end_node.runway != runway:
             raise ValueError(f"taxi-out route does not end holding short of {runway}")
+    elif operation == "taxi_to_runup":
+        if end_node.kind != "run_up" or end_node.runway != runway:
+            raise ValueError(f"run-up route does not end in the Runway {runway} run-up area")
     elif end != "above_all_parking":
         raise ValueError("taxi-in route does not end at Above All Aviation")
 

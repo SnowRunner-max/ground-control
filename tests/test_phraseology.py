@@ -52,6 +52,90 @@ class TestNormalize:
         # all-digit tails keep working
         assert re.search(tail_regex("67525"), normalize("Cessna six seven five two five"))
 
+    @pytest.mark.parametrize(
+        "spoken",
+        [
+            "Cessna three zero six, eight Sierra",
+            "Cessna three zero six. eight Sierra",
+            "Cessna three, zero six eight Sierra",
+        ],
+    )
+    def test_alpha_tail_tolerates_punctuation_split_digits(self, spoken):
+        assert re.search(tail_regex("3068S"), normalize(spoken))
+
+    @pytest.mark.parametrize(
+        "spoken",
+        ["Cessna six, eight Sierra", "Cessna six. eight Sierra"],
+    )
+    def test_short_alpha_tail_tolerates_punctuation_split_digits(self, spoken):
+        assert re.search(
+            tail_regex("68S"),
+            normalize(spoken),
+        )
+
+    @pytest.mark.parametrize(
+        "spoken",
+        [
+            "Cessna three zero six, uh, eight Sierra",
+            "Cessna three zero six. um eight Sierra",
+            "Cessna three zero six er eight Sierra",
+            "Cessna three zero six eight, ah, Sierra",
+        ],
+    )
+    def test_alpha_tail_tolerates_brief_fillers(self, spoken):
+        assert re.search(tail_regex("3068S"), normalize(spoken))
+
+    @pytest.mark.parametrize(
+        "spoken",
+        [
+            "Cessna six, uh, eight Sierra",
+            "Cessna six eight, um, Sierra",
+        ],
+    )
+    def test_short_alpha_tail_tolerates_brief_fillers(self, spoken):
+        assert re.search(tail_regex("68S"), normalize(spoken))
+
+    @pytest.mark.parametrize(
+        "spoken",
+        [
+            "Cessna three zero six, six, eight Sierra",
+            "Cessna three zero six, eight, eight Sierra",
+            "Cessna six, six, eight Sierra",
+        ],
+    )
+    def test_alpha_tail_tolerates_separated_repeated_digits(self, spoken):
+        expected = "68S" if spoken.startswith("Cessna six") else "3068S"
+        assert re.search(tail_regex(expected), normalize(spoken))
+
+    @pytest.mark.parametrize(
+        "spoken",
+        [
+            "Cessna three zero six well eight Sierra",
+            "Cessna three zero six seven eight Sierra",
+            "Cessna 30668S",
+        ],
+    )
+    def test_alpha_tail_rejects_unknown_or_contiguous_extra_tokens(self, spoken):
+        assert not re.search(tail_regex("3068S"), normalize(spoken))
+
+    def test_digit_only_tail_does_not_cross_clause_boundary(self):
+        norm = normalize("Cessna 525, three mile final")
+        assert norm == "cessna 525 3 mile final"
+        assert not re.search(tail_regex("5253"), norm)
+
+    @pytest.mark.parametrize(
+        ("spoken", "merged_value"),
+        [
+            ("squawk four five, heading seven one", "4571"),
+            ("departure one two five point, heading four", "125.4"),
+            ("runway one, five mile final", "15"),
+            ("maintain two thousand, five hundred foot ceiling", "2500"),
+        ],
+    )
+    def test_other_numeric_fields_remain_separated_across_clauses(
+            self, spoken, merged_value):
+        assert merged_value not in normalize(spoken).split()
+
     def test_mic_resolves_to_mike(self):
         # whisper transcribes spoken "Mike" as "mic"; taxiway M readbacks
         # must still match \bmike\b
